@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+
+# OS / 编辑器
+.DS_Store
+Thumbs.db
+*.tmp
+~$*
+
+# Word 临时文件
+法典源/~$*

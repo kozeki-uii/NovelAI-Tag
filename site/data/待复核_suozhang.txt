@@ -1,0 +1,84 @@
+# 所长常规NovalAI个人法典：25 条可能解析有误，请人工瞄一眼
+
+[人外种族 › 类人种族] 树精少女【与奇幻画风串搭配，去掉1girl可出丛林守护者魔物】
+    tree man,nude,woody skin,antlers,covered with tree bark,empty eyes,vine,taupe skin,
+
+[各式服装 › 服装组件] 服饰配件（大腿靴+分离袖+颈环+泡泡袖+猫耳耳机+灯笼裤+泡泡袜/堆堆袜）
+    thigh boots,detached collar,detached sleeves,puffy sleeves,cat ear headphones,bloomers,loose socks,
+
+[各式服装 › 日常/正装服饰 › 日常服] 日常服3（吊带高腰裙+无袖衬衫+分离袖+出租车帽+靴子+单片眼镜+相机）
+    bare legs,bare shoulders,brooch,red cabbie hat,detached sleeves,red high-waist skirt,holding camera,long sleeves,sleevel
+
+[各式服装 › 日常/正装服饰 › 日常服] 日常服22（维多利亚复古款式，水色长裙+白衬衫+披肩大衣+束腰+单片眼镜）
+    victorian fashionaqua skirt,{round monocle},ascot,vest,belt,military uniform,boots,black coat,{coat on shoulders},collar
+
+[各式服装 › 日常/正装服饰 › 日常服] 日常服23（偏现代时尚，彩色墨镜+印花蕾丝+红色外套+紧身衣）
+    hair tucking behind ears,adjust gloves,cleavage slip,black dress,black gloves,sleeveless dress,choke,black bra,frills,re
+
+[各式服装 › 日常/正装服饰 › 夏装] 夏装2（草帽、吊带紧身背心[概率附带纱裙]+单肩包+短裤+持杯）
+    bustier,coffee cup,disposable cup,holding cup,see-through,shorts,shoulder bag,white sun hat,wide brimhorns,【falling peta
+
+[各式服装 › 日常/正装服饰 › 夏装] 夏装9（短款睡衣花边纱裙+贝雷帽+运动鞋）（概率变长裙+外套）
+    black choker,thigh strap,gradient glasses,off-shoulder jacket,black long pajamas,black ruffled dress,black beret,light s
+
+[各式服装 › 日常/正装服饰 › 另类服装] 另类服装7（唇钉+毛皮夹克+牛仔短裤）【咖啡马克杯：coffee mug】
+    hair bow,over-kneehighs,black fur coat,denim shorts,spoken heart,lip piercing,
+
+[各式服装 › 日常/正装服饰 › 另类服装] 另类服装9（斗篷+衬衫+吊带牛仔裤+耳机）【附带吃披萨：holding pizza,】
+    ,headphones around neck,collared shirt,bow,bra,leggings,denim short,strousers with suspenders,color,legwear,cape,hood,
+另
+
+[各式服装 › 日常/正装服饰 › 另类服装] 另类服装23（街头风格，棒球帽+紫色短衫+破牛仔短裤+渔网袜）
+    purple baggie shirts,crop top,short sleeves,midriff,navel,off shoulder,black brasier,black shorts,short shorts,denim sho
+
+[各式服装 › 日常/正装服饰 › 另类服装] 另类日常26（渔网袜+堆堆袜+衬衫裙子，与13有一定出入，故单收）
+    bandaid,skirt,black footwear,black skirt,long sleeves,fishnet pantyhose,maid headdress,bandaid on leg,collar,teddy bear,
+
+[各式服装 › 日常/正装服饰 › 室内服（运动服、睡衣、正常内衣等）] 印花丝袜（移除括号会导致效果不明显，如需其他印花，替换star即可，用符号也行）
+    {{{star print,printed pantyhose}}},{{star print}},{{{printed pantyhose}}},
+
+[各式服装 › 人物职业服饰 › 常规职业] 宾馆前台【老式电话：golden dial telephone】
+    {golden dial telephone},white pantyhose,holding phone,sitting,on chair,high heels,high heels,gold trim,striped,bow shoes
+
+[各式场景 › 视角与打光] blurry foreground：模糊前景，效果顾名思义，意图增加前景遮挡效果可用
+    ray tracing：光线追踪，质量词
+
+[各式场景 › 视角与打光] cinematic lighting：电影级灯光，有一点点效果，基本可以视作质量词
+    see-through silhouette：透视轮廓，透视光照射半透明物体（如纱裙等）后的剪影
+strong contrast：强对比度，与高对比度high contrast相同，不赘述
+light and shadow：光影，一般是增加
+
+[各式场景 › 视角与打光] volumetric lights：体积光，一般是一种窗外射入的光束表现，有一定效果
+    backlighting/sidelighting：背光/侧光，从背后/侧面投射的光，
+
+[各式场景 › 视角与打光] chiaroscuro：明暗对照，等效两个对比度，效果相对更弱
+    dramatic shadow：戏剧性阴影，质量词
+high-key and low-variance brightness scale：高调和低方差亮度等级，质量词
+rim lighting：边缘灯光，一种摄影技术，照亮拍摄对象的边缘以产
+
+[各式场景 › 视角与打光] dappled sunlight：斑驳阳光，阳光穿过树荫照射的表现，效果很好
+    sunshine through window：透过窗户的阳光，顾名思义
+
+[各式场景 › 视角与打光] ff gradien：ff 渐变，一种应用于黑白画面的彩虹渐变，效果较为一般
+    inverted colors：反转颜色，反色效果，一般没用
+colorful：色彩丰富，质量词
+
+[各式场景 › 场景 › 美食有关] 杯中美味水果冰激凌少女（增添no human的tag可转变为豪华水果冰激凌）
+    in cup,oversized food,oversized object,parfait,ice cream,cinnamon stick,starfruit,blueberry,banana,banana slice,orange s
+
+[各式场景 › 场景 › 美食有关] 美食环绕【tag分别为：牛排、牛肉、猪肉、肉、沙拉、奶油、酱汁、豆腐、碗、清酒】
+    steak,beef,pork,meat,salad,cream,sauce,tofu,bowl,sake,
+
+[各式场景 › 场景 › 情感动作] 饮用饮料提神（特别声明，本tag未收到任何广告，只是魔爪出起来方便）
+    {{bags under eyes}},jitome,tired,close-up,holding monster energy,tin cans,
+
+[自然语言] 翻译：
+    {{{{cyberpop 渐变}}}}、低多边形城市景观背景、彩色速度轨迹、多边形云层、数字故障效果、三角阴影投射、霓虹灯网格地板反射、3D 线框发饰、像素化汗滴、矢量艺术面部特征、RGBY 色谱主题、动态姿势、多面日落渐变、多边形火花粒子
+
+[自然语言] 翻译：画面以强烈的明暗对比和阴郁的基调呈现，鲜艳的红色元素在黑暗中仿佛闪耀着光芒。
+    原Tag：1.5::1girl,tattoo,smile,split theme,makeup,white background,solo,half-closed eyes,upper body,portrait,blush,grin,sp
+
+[自然语言] 1. **左上角：** 一个深色cd盒，盒子上显示着女孩在星空背景下的剪影。
+    2. **右上角：** 一个名为“reverse:1999”的电脑窗口，类似于绘画软件界面，显示着女孩头发的草图，一支黑色数字触控笔悬停在上面。
+3. **左侧中央：** 一个透明塑料cd盒，里面装着一张印有女孩脸的cd，上面印有“37”字
+

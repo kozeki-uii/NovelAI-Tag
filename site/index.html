@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>法典图鉴 · NovelAI 提示词</title>
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <button id="menuBtn" class="icon-btn" title="目录">☰</button>
+  <div class="brand">法典<span>图鉴</span></div>
+
+  <label class="codex-pick">
+    <select id="codexSelect"></select>
+  </label>
+
+  <div class="search-wrap">
+    <span class="search-ico">🔍</span>
+    <input id="search" type="search" placeholder="搜索词条或 tag（中 / 英）…" autocomplete="off">
+  </div>
+
+  <label class="toggle" title="只显示已配图的词条">
+    <input type="checkbox" id="onlyImaged"><span>只看有图</span>
+  </label>
+  <button id="themeBtn" class="icon-btn" title="深色 / 浅色">🌙</button>
+</header>
+
+<div class="layout">
+  <aside id="sidebar" class="sidebar">
+    <div class="sb-head">
+      <span id="codexTitle" class="codex-title"></span>
+      <span id="codexMeta" class="codex-meta"></span>
+    </div>
+    <nav id="tree" class="tree"></nav>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="result-bar"><span id="resultInfo"></span></div>
+    <div id="masonry" class="masonry"></div>
+    <div id="sentinel" class="sentinel"></div>
+    <div id="empty" class="empty" hidden>这里还没有词条</div>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<div id="lightbox" class="lightbox" hidden>
+  <img id="lightboxImg" alt="例图">
+</div>
+
+<template id="cardTpl">
+  <article class="card">
+    <div class="card-img-wrap" hidden>
+      <img class="card-img" loading="lazy" alt="">
+      <button class="zoom-btn" title="放大查看">🔍</button>
+    </div>
+    <div class="card-body">
+      <div class="card-title-row">
+        <h3 class="card-title"></h3>
+        <span class="badge-new" hidden>NEW</span>
+      </div>
+      <div class="card-tags"></div>
+      <div class="card-foot">
+        <span class="card-path"></span>
+        <span class="copy-hint">📋 点击复制</span>
+      </div>
+    </div>
+  </article>
+</template>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

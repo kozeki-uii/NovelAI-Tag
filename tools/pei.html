@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>配图工具 · 法典图鉴</title>
+<style>
+  :root{--bg:#f3f5f7;--panel:#fff;--text:#1f2329;--muted:#8b93a1;--line:#e7eaee;--accent:#15a06a;--accent2:#e6f6ef;--zone:#f6f8fa}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif;font-size:14px}
+  header{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .title{font-size:17px;font-weight:800}.title b{color:var(--accent)}
+  select,input[type=search]{border:1px solid var(--line);background:#fff;color:var(--text);border-radius:10px;padding:8px 12px;font-size:13px}
+  input[type=search]{width:260px}
+  .toggle{display:flex;align-items:center;gap:6px;color:var(--muted);cursor:pointer}
+  .toggle input{accent-color:var(--accent);width:15px;height:15px}
+  .progress{margin-left:auto;font-weight:700}.progress b{color:var(--accent)}
+  .bar{height:6px;border-radius:6px;background:var(--line);width:160px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent);width:0}
+  main{max-width:920px;margin:0 auto;padding:18px}
+  .hint{color:var(--muted);margin:0 0 14px}
+  .row{display:flex;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px;align-items:flex-start}
+  .row.done{border-color:var(--accent);background:var(--accent2)}
+  .zone{flex:none;width:124px;height:158px;border-radius:10px;border:2px dashed var(--line);background:var(--zone);
+    display:grid;place-items:center;text-align:center;color:var(--muted);font-size:12px;cursor:pointer;overflow:hidden;position:relative;transition:.12s}
+  .zone:hover{border-color:var(--accent);color:var(--accent)}
+  .zone.drag{border-color:var(--accent);background:var(--accent2)}
+  .zone img{width:100%;height:100%;object-fit:cover}
+  .zone .badge{position:absolute;top:6px;right:6px;background:var(--accent);color:#fff;border-radius:6px;font-size:11px;padding:1px 6px;font-weight:700}
+  .meta{min-width:0;flex:1}
+  .meta h3{margin:2px 0 4px;font-size:15px}
+  .eid{color:var(--muted);font-size:11px;font-weight:400;margin-left:6px}
+  .tags{color:var(--muted);font-size:12px;background:var(--zone);border-radius:8px;padding:8px 10px;max-height:6.4em;overflow:hidden;white-space:pre-wrap;word-break:break-word}
+  .path{color:var(--muted);font-size:11px;margin-top:6px}
+  .empty{color:var(--muted);text-align:center;padding:50px}
+  .uploading{position:absolute;inset:0;background:rgba(255,255,255,.7);display:grid;place-items:center;color:var(--accent);font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <div class="title">配<b>图工具</b></div>
+  <select id="codex"></select>
+  <input id="q" type="search" placeholder="搜索词条 / tag…">
+  <label class="toggle"><input type="checkbox" id="onlyTodo" checked>只看待配图</label>
+  <div class="progress">已配 <b id="done">0</b> / <span id="total">0</span>
+    <div class="bar"><i id="barFill"></i></div>
+  </div>
+</header>
+<main>
+  <p class="hint">把图片<b>拖到左侧方块</b>或点击选择。系统会自动压缩并命名入库，画廊刷新即生效。一次一张，可连续配。</p>
+  <div id="list"></div>
+  <div id="sentinel" style="height:1px"></div>
+  <div id="empty" class="empty" hidden>这个范围里没有待配图的词条 🎉</div>
+</main>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const state={cid:null,codex:null,list:[],rendered:0};
+const CHUNK=40;
+
+async function init(){
+  const cx=await fetch('data/codexes.json').then(r=>r.json());
+  $('#codex').innerHTML=cx.map(c=>`<option value="${c.id}">${c.title}</option>`).join('');
+  $('#codex').onchange=()=>load($('#codex').value);
+  $('#q').oninput=debounce(filter,180);
+  $('#onlyTodo').onchange=filter;
+  new IntersectionObserver(e=>{if(e[0].isIntersecting)more();},{rootMargin:'500px'}).observe($('#sentinel'));
+  if(cx.length) await load(cx[0].id);
+}
+async function load(id){
+  state.cid=id;
+  state.codex=await fetch('data/'+id+'.json?_='+Date.now()).then(r=>r.json());
+  updateProgress();
+  filter();
+}
+function updateProgress(){
+  const d=state.codex.entries.filter(e=>e.image).length, n=state.codex.entries.length;
+  $('#done').textContent=d; $('#total').textContent=n;
+  $('#barFill').style.width=(n?d/n*100:0)+'%';
+}
+function filter(){
+  const q=$('#q').value.trim().toLowerCase();
+  let l=state.codex.entries;
+  if($('#onlyTodo').checked) l=l.filter(e=>!e.image);
+  if(q) l=l.filter(e=>e.title.toLowerCase().includes(q)||e.tags.toLowerCase().includes(q));
+  state.list=l; state.rendered=0; $('#list').innerHTML='';
+  $('#empty').hidden=l.length>0;
+  more();
+}
+function more(){
+  const end=Math.min(state.rendered+CHUNK,state.list.length);
+  const frag=document.createDocumentFragment();
+  for(let i=state.rendered;i<end;i++) frag.appendChild(makeRow(state.list[i]));
+  $('#list').appendChild(frag);
+  state.rendered=end;
+}
+function makeRow(e){
+  const row=document.createElement('div'); row.className='row'+(e.image?' done':'');
+  const zone=document.createElement('div'); zone.className='zone';
+  zone.innerHTML=e.image
+    ? `<img src="images/${state.cid}/${e.image}?_=${Date.now()}"><span class="badge">✓</span>`
+    : '＋<br>拖图/点击';
+  const input=document.createElement('input'); input.type='file'; input.accept='image/*'; input.hidden=true;
+  input.onchange=()=>{ if(input.files[0]) upload(e,row,zone,input.files[0]); };
+  zone.onclick=()=>input.click();
+  zone.ondragover=ev=>{ev.preventDefault();zone.classList.add('drag');};
+  zone.ondragleave=()=>zone.classList.remove('drag');
+  zone.ondrop=ev=>{ev.preventDefault();zone.classList.remove('drag');
+    const f=[...ev.dataTransfer.files].find(f=>f.type.startsWith('image/')); if(f) upload(e,row,zone,f);};
+  zone.appendChild(input);
+  const meta=document.createElement('div'); meta.className='meta';
+  meta.innerHTML=`<h3>${esc(e.title)}<span class="eid">${e.id}</span></h3>`+
+    `<div class="tags">${esc(e.tags)}</div><div class="path">${esc(e.path.join(' › '))}</div>`;
+  row.append(zone,meta);
+  return row;
+}
+function upload(e,row,zone,file){
+  const busy=document.createElement('div'); busy.className='uploading'; busy.textContent='上传中…'; zone.appendChild(busy);
+  const fr=new FileReader();
+  fr.onload=async()=>{
+    try{
+      const r=await fetch('/__upload__',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({codexId:state.cid,entryId:e.id,dataURL:fr.result})}).then(r=>r.json());
+      if(!r.ok) throw new Error(r.error||'失败');
+      e.image=r.image; row.classList.add('done');
+      zone.innerHTML=`<img src="images/${state.cid}/${r.image}?_=${Date.now()}"><span class="badge">✓</span>`;
+      updateProgress();
+      if($('#onlyTodo').checked){ row.style.transition='.4s';row.style.opacity='.0';setTimeout(()=>row.remove(),400); }
+    }catch(err){ busy.textContent='✗ '+err.message; busy.style.color='#e23'; setTimeout(()=>busy.remove(),1500); }
+  };
+  fr.readAsDataURL(file);
+}
+function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+init();
+</script>
+</body>
+</html>
