@@ -182,8 +182,10 @@ def convert(path, cid):
 
 def main():
     docs = sorted(glob.glob(os.path.join(SRC_DIR, "*.docx")))
+    META_KEYS = ("id", "title", "version", "author", "entryCount", "imagedCount")
     index = []
     seen = {}
+    produced = set()
     for d in docs:
         if os.path.basename(d).startswith("~$"):
             continue
@@ -195,9 +197,27 @@ def main():
         else:
             seen[cid] = 1
         info = convert(d, cid)
-        index.append({k: info[k] for k in ("id", "title", "version", "author", "entryCount", "imagedCount")})
+        produced.add(info["id"])
+        index.append({k: info[k] for k in META_KEYS})
         print(f"[OK] {info['id']}: {info['entryCount']} entries, "
               f"{info['imagedCount']} imaged, {info['reviewCount']} to review")
+
+    # 冻结保留：有数据文件、但本次没有对应 docx 的法典，原样保留在索引里
+    # （不重新生成 → 护住你手动改过的 JSON；想彻底删除某本就删它的 <id>.json）
+    for jf in sorted(glob.glob(os.path.join(DATA_DIR, "*.json"))):
+        cid = os.path.splitext(os.path.basename(jf))[0]
+        if cid == "codexes" or cid in produced:
+            continue
+        try:
+            with open(jf, encoding="utf-8") as f:
+                kept = json.load(f)
+            if "entries" not in kept:         # 不是法典数据文件，跳过
+                continue
+            index.append({k: kept.get(k) for k in META_KEYS})
+            print(f"[KEEP] {cid}: kept from existing data (no docx) - {kept.get('entryCount')} entries")
+        except Exception as ex:
+            print(f"[SKIP] {os.path.basename(jf)}: {ex}")
+
     with io.open(os.path.join(DATA_DIR, "codexes.json"), "w", encoding="utf-8") as f:
         json.dump(index, f, ensure_ascii=False, indent=2)
     print(f"[DONE] {len(index)} codex(es) -> site/data/")
