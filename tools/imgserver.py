@@ -66,6 +66,7 @@ def save_image(cid, eid, durl):
     if im.mode not in ("RGB", "L"):
         im = im.convert("RGB")
     im.thumbnail((MAXDIM, MAXDIM), Image.LANCZOS)
+    thumb_w, thumb_h = im.size
     tdir = os.path.join(SITE, "images", cid)
     os.makedirs(tdir, exist_ok=True)
     tfn = eid + ".jpg"
@@ -81,6 +82,8 @@ def save_image(cid, eid, durl):
         for e in d["entries"]:
             if e["id"] == eid:
                 e["image"] = tfn
+                e["imageWidth"] = thumb_w
+                e["imageHeight"] = thumb_h
                 e["original"] = ofn
                 e["assetRev"] = rev
                 break
@@ -100,7 +103,15 @@ def save_image(cid, eid, durl):
             with open(ip, "w", encoding="utf-8") as f:
                 json.dump(index, f, ensure_ascii=False, indent=2)
 
-    return {"ok": True, "image": tfn, "original": ofn, "assetRev": rev, "imagedCount": d["imagedCount"]}
+    return {
+        "ok": True,
+        "image": tfn,
+        "imageWidth": thumb_w,
+        "imageHeight": thumb_h,
+        "original": ofn,
+        "assetRev": rev,
+        "imagedCount": d["imagedCount"],
+    }
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):

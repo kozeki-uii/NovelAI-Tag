@@ -1,18 +1,31 @@
 'use strict';
+
 const $ = (s, r = document) => r.querySelector(s);
-const CHUNK = 80;
+
+const CARD_MIN_WIDTH = 290;
+const GAP = 16;
+const VIRTUAL_BUFFER_UP = 0.8;
+const VIRTUAL_BUFFER_DOWN = 1.4;
+const IMAGE_LOAD_DELAY = 90;
+const RELAYOUT_INTERVAL = 90;
+const RELAYOUT_ANIM_MS = 360;
+const DEFAULT_IMAGE_RATIO = 1.18;
+const MAX_TAG_LINES = 6;
 
 const state = {
   codex: null,        // 当前法典数据
   list: [],           // 当前过滤后的词条
-  rendered: 0,        // 已渲染数量
-  cols: [],           // 瀑布流列元素
+  rendered: 0,        // 当前虚拟渲染数量
+  placements: [],     // 虚拟瀑布流布局
+  nodes: new Map(),   // index -> DOM node
   colN: 0,
+  itemWidth: 0,
   activePath: [],     // 选中的目录路径
   query: '',
   onlyImaged: false,
   onlyFav: false,
   favs: new Set(),    // 收藏集合，键为 codexId:entryId
+  loadedImages: new Set(),
   media: {
     baseUrl: '',
     imagePrefix: 'images',
@@ -28,17 +41,24 @@ const THEME_ICONS = {
 
 /* ---------------- 数据加载 ---------------- */
 async function init() {
-  state.favs = new Set(JSON.parse(localStorage.getItem('fadian-favs') || '[]'));
-  const [codexes, media] = await Promise.all([
-    fetch('data/codexes.json').then(r => r.json()),
-    loadMedia(),
-  ]);
-  state.media = { ...state.media, ...media };
-  const sel = $('#codexSelect');
-  sel.innerHTML = codexes.map(c => `<option value="${c.id}">${c.title}</option>`).join('');
-  sel.onchange = () => loadCodex(sel.value);
-  bindUI();
-  if (codexes.length) await loadCodex(codexes[0].id);
+  try {
+    setLoading('正在加载法典索引…');
+    state.favs = new Set(JSON.parse(localStorage.getItem('fadian-favs') || '[]'));
+    const [codexes, media] = await Promise.all([
+      fetch('data/codexes.json').then(r => r.json()),
+      loadMedia(),
+    ]);
+    state.media = { ...state.media, ...media };
+    const sel = $('#codexSelect');
+    sel.innerHTML = codexes.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('');
+    sel.onchange = () => loadCodex(sel.value);
+    bindUI();
+    if (codexes.length) await loadCodex(codexes[0].id);
+    else setLoading('还没有可显示的法典数据');
+  } catch (ex) {
+    console.error(ex);
+    setLoading('加载失败，请刷新页面重试');
+  }
 }
 
 async function loadMedia() {
@@ -50,13 +70,26 @@ async function loadMedia() {
 }
 
 async function loadCodex(id) {
+  setLoading('正在加载词条数据…');
+  clearMasonry();
   state.codex = await fetch(`data/${id}.json`).then(r => r.json());
   const c = state.codex;
   $('#codexTitle').textContent = c.title;
   $('#codexMeta').textContent = `${c.author ? c.author + ' · ' : ''}${c.version} · ${c.entryCount} 条`;
-  state.activePath = []; state.query = ''; $('#search').value = '';
+  state.activePath = [];
+  state.query = '';
+  $('#search').value = '';
   renderTree();
-  applyFilter();
+  applyFilter({ resetScroll: true });
+  setLoading('');
+}
+
+function setLoading(text) {
+  const el = $('#loading');
+  if (!el) return;
+  el.textContent = text || '';
+  el.hidden = !text;
+  $('#main')?.classList.toggle('is-loading', Boolean(text));
 }
 
 /* ---------------- 目录树 ---------------- */
@@ -79,7 +112,7 @@ function buildNodes(nodes, parent, prefix, depth) {
     item.className = 'tree-item' + (depth >= 1 ? ' collapsed' : '');
     const row = document.createElement('div');
     row.className = 'tree-row';
-    row.dataset.path = path.join('');
+    row.dataset.path = path.join('\u0001');
     const hasKids = nd.children && nd.children.length;
     row.innerHTML =
       `<span class="tw-arrow">${hasKids ? '▾' : ''}</span>` +
@@ -99,15 +132,16 @@ function buildNodes(nodes, parent, prefix, depth) {
 
 function selectPath(path, rowEl) {
   state.activePath = path;
-  state.query = ''; $('#search').value = '';
+  state.query = '';
+  $('#search').value = '';
   document.querySelectorAll('.tree-row.active').forEach(r => r.classList.remove('active'));
   rowEl.classList.add('active');
   if (window.innerWidth <= 600) $('#sidebar').classList.add('hidden');
-  applyFilter();
+  applyFilter({ resetScroll: true });
 }
 
 /* ---------------- 过滤 ---------------- */
-function applyFilter() {
+function applyFilter(options = {}) {
   const q = state.query.trim().toLowerCase();
   let list = state.codex.entries;
   if (q) {
@@ -120,7 +154,7 @@ function applyFilter() {
   if (state.onlyFav) list = list.filter(e => state.favs.has(favKey(e)));
   state.list = list;
   updateResultBar();
-  renderList();
+  renderList(options);
 }
 
 function updateResultBar() {
@@ -134,72 +168,281 @@ function updateResultBar() {
   $('#empty').hidden = n > 0;
 }
 
-/* ---------------- 瀑布流渲染 ---------------- */
+/* ---------------- 虚拟瀑布流 ---------------- */
 function colCount() {
   const w = $('#masonry').clientWidth || $('#main').clientWidth;
-  return Math.max(1, Math.floor((w + 16) / (290 + 16)));
-}
-function buildColumns(n) {
-  const m = $('#masonry');
-  m.innerHTML = '';
-  state.cols = [];
-  for (let i = 0; i < n; i++) {
-    const c = document.createElement('div');
-    c.className = 'col';
-    m.appendChild(c);
-    state.cols.push(c);
-  }
-  state.colN = n;
-}
-function shortestCol() {
-  let best = state.cols[0];
-  for (const c of state.cols) if (c.offsetHeight < best.offsetHeight) best = c;
-  return best;
-}
-function renderList() {
-  buildColumns(colCount());
-  state.rendered = 0;
-  renderMore();
-}
-function renderMore() {
-  const end = Math.min(state.rendered + CHUNK, state.list.length);
-  for (let i = state.rendered; i < end; i++) shortestCol().appendChild(makeCard(state.list[i]));
-  state.rendered = end;
+  return Math.max(1, Math.floor((w + GAP) / (CARD_MIN_WIDTH + GAP)));
 }
 
-function makeCard(e) {
+function clearMasonry() {
+  for (const node of state.nodes.values()) cleanupCard(node);
+  state.nodes.clear();
+  state.placements = [];
+  state.rendered = 0;
+  const m = $('#masonry');
+  if (m) {
+    m.innerHTML = '';
+    m.style.height = '0px';
+  }
+}
+
+function renderList({ resetScroll = false } = {}) {
+  clearMasonry();
+  if (resetScroll) window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  computeLayout();
+  updateVirtualCards(true);
+}
+
+function computeLayout() {
+  const m = $('#masonry');
+  const width = Math.max(1, m.clientWidth || $('#main').clientWidth || 1);
+  const n = colCount();
+  const itemWidth = Math.max(180, Math.floor((width - GAP * (n - 1)) / n));
+  const colHeights = Array.from({ length: n }, () => 0);
+  const placements = [];
+
+  for (let i = 0; i < state.list.length; i++) {
+    const entry = state.list[i];
+    const col = shortestIndex(colHeights);
+    const imageHeight = estimateImageHeight(entry, itemWidth);
+    const body = estimateBodyMetrics(entry, itemWidth);
+    const height = Math.ceil(imageHeight + body.height);
+    const left = col * (itemWidth + GAP);
+    const top = colHeights[col];
+
+    placements.push(Object.freeze({
+      index: i,
+      entry,
+      left,
+      top,
+      width: itemWidth,
+      height,
+      imageHeight,
+      tagsHeight: body.tagsHeight,
+    }));
+    colHeights[col] += height + GAP;
+  }
+
+  state.placements = placements;
+  state.colN = n;
+  state.itemWidth = itemWidth;
+  const totalHeight = placements.length ? Math.max(...colHeights) - GAP : 0;
+  m.style.height = `${Math.max(0, Math.ceil(totalHeight))}px`;
+}
+
+function shortestIndex(values) {
+  let best = 0;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] < values[best]) best = i;
+  }
+  return best;
+}
+
+function estimateImageHeight(e, width) {
+  if (!e.image) return 0;
+  const iw = Number(e.imageWidth || e.width || e.thumbWidth);
+  const ih = Number(e.imageHeight || e.height || e.thumbHeight);
+  const ratio = iw > 0 && ih > 0 ? ih / iw : DEFAULT_IMAGE_RATIO;
+  return Math.round(width * clamp(ratio, 0.55, 1.9));
+}
+
+function estimateBodyMetrics(e, width) {
+  const contentWidth = Math.max(120, width - 26);
+  const titleLines = clamp(Math.ceil(textUnits(e.title) / Math.max(8, Math.floor(contentWidth / 14))), 1, 2);
+  const tagLines = estimateTagLines(e.tags, contentWidth);
+  const titleHeight = titleLines * 20;
+  const tagsHeight = clamp(tagLines * 16 + 18, 42, 114);
+  return {
+    height: Math.ceil(12 + titleHeight + 8 + tagsHeight + 9 + 17 + 11),
+    tagsHeight,
+  };
+}
+
+function estimateTagLines(text, width) {
+  const perLine = Math.max(18, Math.floor(width / 7));
+  const lines = String(text || '').split(/\n+/).reduce((sum, line) => {
+    return sum + Math.max(1, Math.ceil(textUnits(line) / perLine));
+  }, 0);
+  return clamp(lines, 2, MAX_TAG_LINES);
+}
+
+function textUnits(text) {
+  let units = 0;
+  for (const ch of String(text || '')) units += /[\u4e00-\u9fff]/.test(ch) ? 2 : 1;
+  return units;
+}
+
+let virtualRaf = 0;
+let relayoutTimer = 0;
+let relayoutAnimTimer = 0;
+let relayoutQueuedAnimate = false;
+let lastRelayoutAt = 0;
+function scheduleVirtualUpdate() {
+  if (virtualRaf) return;
+  virtualRaf = requestAnimationFrame(() => {
+    virtualRaf = 0;
+    updateVirtualCards();
+  });
+}
+
+function updateVirtualCards(force = false) {
+  const m = $('#masonry');
+  if (!m || !state.placements.length) {
+    state.rendered = 0;
+    return;
+  }
+
+  const rect = m.getBoundingClientRect();
+  const viewportTop = -rect.top;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const rangeTop = Math.max(0, viewportTop - viewportHeight * VIRTUAL_BUFFER_UP);
+  const rangeBottom = viewportTop + viewportHeight * (1 + VIRTUAL_BUFFER_DOWN);
+  const next = new Set();
+
+  for (const placement of state.placements) {
+    if (placement.top + placement.height < rangeTop || placement.top > rangeBottom) continue;
+    next.add(placement.index);
+    let node = state.nodes.get(placement.index);
+    if (!node) {
+      node = makeCard(placement);
+      state.nodes.set(placement.index, node);
+      m.appendChild(node);
+    } else if (force) {
+      updateCardPosition(node, placement);
+    }
+  }
+
+  for (const [index, node] of state.nodes) {
+    if (next.has(index)) continue;
+    cleanupCard(node);
+    node.remove();
+    state.nodes.delete(index);
+  }
+  state.rendered = next.size;
+}
+
+function makeCard(placement) {
+  const e = placement.entry;
   const node = $('#cardTpl').content.firstElementChild.cloneNode(true);
+  node.dataset.index = String(placement.index);
+  updateCardPosition(node, placement);
+
   node.querySelector('.card-title').textContent = e.title;
   node.querySelector('.card-tags').textContent = e.tags;
   node.querySelector('.card-path').textContent = e.path.join(' › ');
   if (e.isNew) node.querySelector('.badge-new').hidden = false;
+
   const fav = node.querySelector('.fav-btn');
   const faved = state.favs.has(favKey(e));
   fav.textContent = faved ? '★' : '☆';
   fav.classList.toggle('on', faved);
   fav.onclick = ev => { ev.stopPropagation(); toggleFav(e, fav); };
+
   if (e.image) {
-    const wrap = node.querySelector('.card-img-wrap');
-    const img = node.querySelector('.card-img');
-    img.src = thumbUrl(e);
-    img.alt = e.title;
-    img.onerror = () => {
-      const fallback = localAssetUrl('image', e);
-      if (fallback && img.dataset.fallbackTried !== '1') {
-        img.dataset.fallbackTried = '1';
-        img.src = fallback;
-      }
-    };
-    wrap.hidden = false;
-    wrap.querySelector('.zoom-btn').onclick = ev => {
-      ev.stopPropagation();
-      openLightbox(originalUrl(e) || img.src, img.src);
-    };
+    setupImage(node, placement);
   } else {
     node.classList.add('no-img');
   }
+
   node.onclick = () => copyEntry(e, node);
   return node;
+}
+
+function updateCardPosition(node, placement) {
+  node.style.width = `${placement.width}px`;
+  node.style.height = `${placement.height}px`;
+  node.style.transform = `translate3d(${placement.left}px, ${placement.top}px, 0)`;
+  const wrap = node.querySelector('.card-img-wrap');
+  if (wrap && placement.imageHeight) wrap.style.height = `${placement.imageHeight}px`;
+  const tags = node.querySelector('.card-tags');
+  if (tags) tags.style.height = `${placement.tagsHeight}px`;
+}
+
+function setupImage(node, placement) {
+  const e = placement.entry;
+  const wrap = node.querySelector('.card-img-wrap');
+  const img = node.querySelector('.card-img');
+  const url = thumbUrl(e);
+  const key = imageKey(e, url);
+
+  wrap.hidden = false;
+  wrap.style.height = `${placement.imageHeight}px`;
+  wrap.classList.add('is-loading');
+  img.alt = e.title;
+
+  const markLoaded = () => {
+    state.loadedImages.add(key);
+    wrap.classList.remove('is-loading', 'is-error');
+    img.classList.add('is-loaded');
+  };
+  const load = () => {
+    node._imageTimer = 0;
+    img.src = url;
+  };
+
+  img.onload = markLoaded;
+  img.onerror = () => {
+    const fallback = localAssetUrl('image', e);
+    if (fallback && fallback !== img.src && img.dataset.fallbackTried !== '1') {
+      img.dataset.fallbackTried = '1';
+      img.src = fallback;
+      return;
+    }
+    wrap.classList.remove('is-loading');
+    wrap.classList.add('is-error');
+  };
+
+  if (state.loadedImages.has(key)) load();
+  else node._imageTimer = window.setTimeout(load, IMAGE_LOAD_DELAY);
+
+  wrap.querySelector('.zoom-btn').onclick = ev => {
+    ev.stopPropagation();
+    openLightbox(originalUrl(e) || img.src || url, img.src || url);
+  };
+}
+
+function cleanupCard(node) {
+  if (node._imageTimer) {
+    clearTimeout(node._imageTimer);
+    node._imageTimer = 0;
+  }
+}
+
+function imageKey(e, url) {
+  return `${state.codex.id}:${e.id}:${e.assetRev || ''}:${url}`;
+}
+
+function scheduleRelayout(animate = true) {
+  relayoutQueuedAnimate = relayoutQueuedAnimate || animate;
+  if (relayoutTimer) return;
+  const now = performance.now();
+  const delay = Math.max(0, RELAYOUT_INTERVAL - (now - lastRelayoutAt));
+  relayoutTimer = window.setTimeout(() => {
+    relayoutTimer = 0;
+    lastRelayoutAt = performance.now();
+    relayoutVisible({ animate: relayoutQueuedAnimate });
+    relayoutQueuedAnimate = false;
+  }, delay);
+}
+
+function startRelayoutAnimation() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const m = $('#masonry');
+  if (!m) return;
+  m.classList.add('is-relayouting');
+  // Make sure the transition class is active before the new transforms land.
+  void m.offsetWidth;
+  clearTimeout(relayoutAnimTimer);
+  relayoutAnimTimer = window.setTimeout(() => {
+    m.classList.remove('is-relayouting');
+  }, RELAYOUT_ANIM_MS + 80);
+}
+
+function relayoutVisible({ animate = false } = {}) {
+  if (!state.codex) return;
+  if (animate) startRelayoutAnimation();
+  computeLayout();
+  updateVirtualCards(true);
 }
 
 /* ---------------- 复制 ---------------- */
@@ -234,7 +477,7 @@ function toggleFav(e, btn) {
   localStorage.setItem('fadian-favs', JSON.stringify([...state.favs]));
   const on = state.favs.has(k);
   if (btn) { btn.textContent = on ? '★' : '☆'; btn.classList.toggle('on', on); }
-  if (state.onlyFav) applyFilter();
+  if (state.onlyFav) applyFilter({ resetScroll: true });
 }
 
 /* ---------------- 灯箱 ---------------- */
@@ -291,7 +534,6 @@ function originalUrl(e) {
 
 /* ---------------- 交互绑定 ---------------- */
 function bindUI() {
-  // 搜索（防抖）
   let st;
   $('#search').oninput = e => {
     clearTimeout(st);
@@ -300,13 +542,13 @@ function bindUI() {
       if (state.query.trim()) {
         document.querySelectorAll('.tree-row.active').forEach(r => r.classList.remove('active'));
       }
-      applyFilter();
+      applyFilter({ resetScroll: true });
     }, 180);
   };
-  // 只看有图
-  $('#onlyImaged').onchange = e => { state.onlyImaged = e.target.checked; applyFilter(); };
-  $('#onlyFav').onchange = e => { state.onlyFav = e.target.checked; applyFilter(); };
-  // 主题
+
+  $('#onlyImaged').onchange = e => { state.onlyImaged = e.target.checked; applyFilter({ resetScroll: true }); };
+  $('#onlyFav').onchange = e => { state.onlyFav = e.target.checked; applyFilter({ resetScroll: true }); };
+
   const applyTheme = d => {
     document.body.classList.toggle('dark', d);
     $('#themeBtn').innerHTML = d ? THEME_ICONS.sun : THEME_ICONS.moon;
@@ -315,29 +557,34 @@ function bindUI() {
   };
   $('#themeBtn').onclick = () => applyTheme(!document.body.classList.contains('dark'));
   applyTheme(localStorage.getItem('fadian-dark') === '1');
-  // 侧栏开关（移动端）
+
   $('#menuBtn').onclick = () => $('#sidebar').classList.toggle('hidden');
-  // 灯箱关闭
   $('#lightbox').onclick = () => { $('#lightbox').hidden = true; $('#lightboxImg').src = ''; };
-  // 无限滚动
-  new IntersectionObserver(es => {
-    if (es[0].isIntersecting && state.rendered < state.list.length) renderMore();
-  }, { rootMargin: '600px' }).observe($('#sentinel'));
-  // 窗口缩放重排
-  let rt;
+
+  window.addEventListener('scroll', scheduleVirtualUpdate, { passive: true });
+
   window.addEventListener('resize', () => {
-    clearTimeout(rt);
-    rt = setTimeout(() => {
-      if (colCount() !== state.colN) {
-        const keep = state.rendered;
-        buildColumns(colCount());
-        state.rendered = 0;
-        while (state.rendered < keep && state.rendered < state.list.length) renderMore();
-      }
-    }, 160);
-  });
+    scheduleRelayout(true);
+  }, { passive: true });
+
+  if ('ResizeObserver' in window) {
+    let lastMainWidth = 0;
+    const ro = new ResizeObserver(entries => {
+      const width = Math.round(entries[0]?.contentRect?.width || 0);
+      if (!width || Math.abs(width - lastMainWidth) < 2) return;
+      lastMainWidth = width;
+      scheduleRelayout(true);
+    });
+    ro.observe($('#main'));
+  }
 }
 
-function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
 
 init();

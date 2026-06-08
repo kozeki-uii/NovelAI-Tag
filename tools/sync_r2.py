@@ -24,6 +24,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from PIL import Image
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "site" / "data"
@@ -63,6 +65,16 @@ def file_rev(paths):
         if path and path.exists():
             h.update(sha256_hex(path).encode("ascii"))
     return h.hexdigest()[:16] if h.digest_size else ""
+
+
+def image_dimensions(path):
+    if not path or not path.exists():
+        return None
+    try:
+        with Image.open(path) as im:
+            return im.size
+    except Exception:
+        return None
 
 
 def guess_type(path):
@@ -153,8 +165,10 @@ def collect_assets(apply_metadata=False):
         for entry in codex.get("entries", []):
             image = entry.get("image")
             if not image:
-                entry.pop("original", None)
-                entry.pop("assetRev", None)
+                for key in ("original", "assetRev", "imageWidth", "imageHeight"):
+                    if key in entry:
+                        entry.pop(key, None)
+                        changed = True
                 continue
 
             imaged += 1
@@ -162,6 +176,11 @@ def collect_assets(apply_metadata=False):
             thumb_path = THUMB_DIR / cid / image
             if not thumb_path.exists():
                 issues.append(f"missing thumbnail: {cid}/{image}")
+            else:
+                dims = image_dimensions(thumb_path)
+                if dims and (entry.get("imageWidth") != dims[0] or entry.get("imageHeight") != dims[1]):
+                    entry["imageWidth"], entry["imageHeight"] = dims
+                    changed = True
 
             original_name, original_path, duplicate = first_original(cid, eid, entry.get("original"))
             if duplicate:

@@ -342,11 +342,14 @@ def save_image(zf, media, entry_id, site_image_dir, original_dir):
     if image.mode not in ("RGB", "L"):
         image = image.convert("RGB")
     image.thumbnail((MAXDIM, MAXDIM), Image.LANCZOS)
+    thumb_w, thumb_h = image.size
     thumb_name = f"{entry_id}.jpg"
     thumb_path = site_image_dir / thumb_name
     image.save(thumb_path, "JPEG", quality=86, optimize=True)
     return {
         "image": thumb_name,
+        "imageWidth": thumb_w,
+        "imageHeight": thumb_h,
         "original": original_name,
         "assetRev": asset_rev(thumb_path, original_path),
     }

@@ -11,6 +11,7 @@ import os, re, io, json, hashlib, glob
 from collections import defaultdict
 from docx import Document
 from docx.oxml.ns import qn
+from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(ROOT, "法典源")
@@ -269,12 +270,29 @@ def local_asset_rev(cid, image, original):
         found = True
     return h.hexdigest()[:16] if found else None
 
+def image_dimensions(cid, image, old=None):
+    old = old or {}
+    if image:
+        path = os.path.join(IMG_DIR, cid, image)
+        if os.path.exists(path):
+            try:
+                with Image.open(path) as im:
+                    return im.size
+            except Exception:
+                pass
+    w = old.get("imageWidth")
+    h = old.get("imageHeight")
+    return (w, h) if w and h else None
+
 def image_metadata(cid, eid, old=None):
     old = old or {}
     image = old.get("image") or find_image(cid, eid)
     original = old.get("original") or find_original(cid, eid)
     asset_rev = old.get("assetRev") or local_asset_rev(cid, image, original)
     meta = {"image": image}
+    dims = image_dimensions(cid, image, old)
+    if dims:
+        meta["imageWidth"], meta["imageHeight"] = dims
     if original:
         meta["original"] = original
     if asset_rev:
