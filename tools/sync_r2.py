@@ -21,6 +21,7 @@ import os
 import posixpath
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,6 +43,9 @@ DEFAULT_IMAGE_PREFIX = "images"
 DEFAULT_ORIGINAL_PREFIX = "originals"
 ORIGINAL_PRIORITY = {"png": 0, "jpg": 1, "jpeg": 2, "webp": 3, "gif": 4, "avif": 5}
 DEFAULT_UPLOAD_WORKERS = 16
+DEFAULT_UPLOAD_RETRIES = 3
+DEFAULT_RETRY_BASE_DELAY = 1.0
+RETRYABLE_UPLOAD_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
 def load_json(path, default=None):
@@ -444,12 +448,48 @@ def remote_needs_upload(remote_objects, manifest_objects, key, path, sha):
     return False, "same size"
 
 
+def put_file_with_retries(client, key, path, sha, cache_control, retries, base_delay, log_retry=None):
+    attempts = max(1, int(retries) + 1)
+    delay = max(0.0, float(base_delay))
+    for attempt in range(1, attempts + 1):
+        try:
+            status, headers, body = client.put_file(key, path, sha, cache_control)
+        except Exception as ex:
+            if attempt >= attempts:
+                raise
+            wait = delay * (2 ** (attempt - 1))
+            if log_retry:
+                log_retry(f"retry {attempt}/{attempts - 1} {key}: {ex}; wait {wait:.1f}s")
+            if wait:
+                time.sleep(wait)
+            continue
+
+        if status in (200, 201):
+            return status, headers, body, attempt
+        if status not in RETRYABLE_UPLOAD_STATUSES or attempt >= attempts:
+            return status, headers, body, attempt
+
+        wait = delay * (2 ** (attempt - 1))
+        if log_retry:
+            log_retry(f"retry {attempt}/{attempts - 1} {key}: status {status}; wait {wait:.1f}s")
+        if wait:
+            time.sleep(wait)
+
+    return 0, {}, b"", attempts
+
+
 def sync_assets(args, cfg, assets):
     client = R2Client(cfg)
     image_prefix = cfg["image_prefix"]
     original_prefix = cfg["original_prefix"]
     cache_control = cfg.get("cache_control") or "public, max-age=31536000, immutable"
     workers = max(1, int(getattr(args, "workers", None) or cfg.get("upload_workers") or DEFAULT_UPLOAD_WORKERS))
+    retries = max(0, int(getattr(args, "retries", None) if getattr(args, "retries", None) is not None else cfg.get("upload_retries", DEFAULT_UPLOAD_RETRIES)))
+    retry_base_delay = float(
+        getattr(args, "retry_base_delay", None)
+        if getattr(args, "retry_base_delay", None) is not None
+        else cfg.get("retry_base_delay", DEFAULT_RETRY_BASE_DELAY)
+    )
     counts = {"checked": 0, "upload": 0, "skip": 0, "fail": 0}
     failures = []
     prefixes = sorted({image_prefix, original_prefix})
@@ -487,20 +527,39 @@ def sync_assets(args, cfg, assets):
 
     # Pass 2 (parallel): upload only the files that actually need it.
     if pending:
-        print(f"uploading {len(pending)} object(s) with {workers} parallel worker(s)", flush=True)
+        print(
+            f"uploading {len(pending)} object(s) with {workers} parallel worker(s), "
+            f"{retries} retries",
+            flush=True,
+        )
         done = [0]
 
         def _upload(item):
             key, path, sha = item
+            def _log_retry(message):
+                with lock:
+                    print(message, flush=True)
+
             try:
-                status, _headers, body = client.put_file(key, path, sha, cache_control)
+                status, _headers, body, attempts = put_file_with_retries(
+                    client,
+                    key,
+                    path,
+                    sha,
+                    cache_control,
+                    retries,
+                    retry_base_delay,
+                    log_retry=_log_retry,
+                )
                 if status not in (200, 201):
                     with lock:
                         counts["fail"] += 1
-                        failures.append(f"upload failed {key}: {status} {body[:200]!r}")
+                        failures.append(f"upload failed {key} after {attempts} attempt(s): {status} {body[:200]!r}")
                 else:
                     with lock:
                         next_manifest[key] = {"size": path.stat().st_size, "sha256": sha}
+                        if attempts > 1:
+                            print(f"uploaded {key} after {attempts} attempts", flush=True)
                     if args.verbose:
                         print(f"uploaded {key}")
             except Exception as ex:
@@ -543,6 +602,10 @@ def main():
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--workers", type=int, default=None,
                         help="Parallel upload workers (default %d)." % DEFAULT_UPLOAD_WORKERS)
+    parser.add_argument("--retries", type=int, default=None,
+                        help="Retry failed uploads this many times (default %d)." % DEFAULT_UPLOAD_RETRIES)
+    parser.add_argument("--retry-base-delay", type=float, default=None,
+                        help="Initial retry backoff in seconds (default %.1f)." % DEFAULT_RETRY_BASE_DELAY)
     args = parser.parse_args()
 
     need_cfg = not args.metadata_only and not args.dry_run
