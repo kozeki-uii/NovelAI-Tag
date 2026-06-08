@@ -3,10 +3,14 @@ setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
 
-REM --- find Python: prefer the 'py' launcher, then 'python' ---
+REM --- find Python: prefer python, then the py launcher ---
 set "PY="
-where py >nul 2>nul && set "PY=py"
-if not defined PY ( where python >nul 2>nul && set "PY=python" )
+python --version >nul 2>nul
+if not errorlevel 1 set "PY=python"
+if not defined PY (
+  py -3 --version >nul 2>nul
+  if not errorlevel 1 set "PY=py -3"
+)
 if not defined PY (
   echo [ERROR] Python not found.
   echo Install Python 3 from https://www.python.org/downloads/ ^(tick "Add to PATH"^).
@@ -21,7 +25,7 @@ if not exist r2_config.json (
   exit /b 1
 )
 
-%PY% tools\sync_r2.py %*
+call %PY% tools\sync_r2.py %*
 set "RC=%ERRORLEVEL%"
 echo.
 if not "%RC%"=="0" (

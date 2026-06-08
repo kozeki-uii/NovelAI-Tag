@@ -22,6 +22,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from PIL import Image
@@ -33,6 +34,7 @@ THUMB_DIR = ROOT / "site" / "images"
 ORIG_DIR = ROOT / "originals"
 MEDIA_PATH = DATA_DIR / "media.json"
 CONFIG_PATH = ROOT / "r2_config.json"
+MANIFEST_PATH = ROOT / ".r2_sync_manifest.json"
 DEFAULT_BUCKET = "novelai-tag-assets"
 DEFAULT_IMAGE_PREFIX = "images"
 DEFAULT_ORIGINAL_PREFIX = "originals"
@@ -65,6 +67,16 @@ def file_rev(paths):
         if path and path.exists():
             h.update(sha256_hex(path).encode("ascii"))
     return h.hexdigest()[:16] if h.digest_size else ""
+
+
+def rev_from_hashes(hashes):
+    h = hashlib.sha256()
+    used = False
+    for value in hashes:
+        if value:
+            h.update(value.encode("ascii"))
+            used = True
+    return h.hexdigest()[:16] if used else ""
 
 
 def image_dimensions(path):
@@ -194,19 +206,18 @@ def collect_assets(apply_metadata=False):
             else:
                 issues.append(f"missing original for imaged entry: {eid}")
 
-            rev_paths = [thumb_path]
-            if original_path and original_path.exists():
-                rev_paths.append(original_path)
-            if thumb_path.exists():
-                rev = file_rev(rev_paths)
+            thumb_sha = sha256_hex(thumb_path) if thumb_path.exists() else ""
+            original_sha = sha256_hex(original_path) if original_path and original_path.exists() else ""
+            if thumb_sha:
+                rev = rev_from_hashes([thumb_sha, original_sha])
                 if entry.get("assetRev") != rev:
                     entry["assetRev"] = rev
                     changed = True
 
             if thumb_path.exists():
-                assets.append(("image", cid, image, thumb_path, entry.get("assetRev") or ""))
+                assets.append(("image", cid, image, thumb_path, thumb_sha))
             if original_name and original_path and original_path.exists():
-                assets.append(("original", cid, original_name, original_path, entry.get("assetRev") or ""))
+                assets.append(("original", cid, original_name, original_path, original_sha))
 
         if codex.get("imagedCount") != imaged:
             codex["imagedCount"] = imaged
@@ -260,14 +271,34 @@ class R2Client:
         k_service = sign(k_region, "s3")
         return sign(k_service, "aws4_request")
 
-    def _request(self, method, key, body=b"", headers=None):
+    def _canonical_query(self, query):
+        if not query:
+            return ""
+        pairs = []
+        for name, value in query.items():
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                values = value
+            else:
+                values = [value]
+            for item in values:
+                pairs.append((
+                    urllib.parse.quote(str(name), safe="-_.~"),
+                    urllib.parse.quote(str(item), safe="-_.~"),
+                ))
+        pairs.sort()
+        return "&".join(f"{name}={value}" for name, value in pairs)
+
+    def _request(self, method, key, body=b"", headers=None, query=None):
         headers = dict(headers or {})
         now = dt.datetime.now(dt.timezone.utc)
         amz_date = now.strftime("%Y%m%dT%H%M%SZ")
         datestamp = now.strftime("%Y%m%d")
         payload_hash = hashlib.sha256(body).hexdigest()
-        path = "/" + self.bucket + "/" + key
+        path = "/" + self.bucket + ("/" + key if key else "")
         canonical_uri = urllib.parse.quote(path, safe="/~")
+        canonical_query = self._canonical_query(query)
 
         headers.update({
             "host": self.host,
@@ -279,7 +310,7 @@ class R2Client:
         canonical_request = "\n".join([
             method,
             canonical_uri,
-            "",
+            canonical_query,
             canonical_headers,
             signed_headers,
             payload_hash,
@@ -300,6 +331,8 @@ class R2Client:
         )
 
         url = self.endpoint + canonical_uri
+        if canonical_query:
+            url += "?" + canonical_query
         req = urllib.request.Request(url, data=body if method != "HEAD" else None, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=60) as res:
@@ -321,19 +354,91 @@ class R2Client:
         }
         return self._request("PUT", key, body=body, headers=headers)
 
+    def list_objects_v2(self, prefix):
+        objects = {}
+        token = None
+        pages = 0
+        prefix = prefix.strip("/")
+        if prefix:
+            prefix += "/"
+        while True:
+            query = {
+                "list-type": "2",
+                "max-keys": "1000",
+                "prefix": prefix,
+            }
+            if token:
+                query["continuation-token"] = token
+            status, _headers, body = self._request("GET", "", query=query)
+            if status >= 400:
+                raise RuntimeError(f"list failed for {prefix or '<bucket>'}: {status} {body[:200]!r}")
+            pages += 1
+            root = ET.fromstring(body)
+            for item in root.findall("./{*}Contents"):
+                key = item.findtext("./{*}Key")
+                size = item.findtext("./{*}Size")
+                if not key:
+                    continue
+                try:
+                    size = int(size or "0")
+                except ValueError:
+                    size = 0
+                objects[key] = {
+                    "size": size,
+                    "etag": (item.findtext("./{*}ETag") or "").strip('"'),
+                    "last_modified": item.findtext("./{*}LastModified") or "",
+                }
+            truncated = (root.findtext("./{*}IsTruncated") or "").lower() == "true"
+            token = root.findtext("./{*}NextContinuationToken")
+            print(
+                f"listed {len(objects)} remote objects under {prefix or '<bucket>'} "
+                f"({pages} page(s))",
+                flush=True,
+            )
+            if not truncated or not token:
+                break
+        return objects
 
-def remote_needs_upload(client, key, path):
-    sha = sha256_hex(path)
-    status, headers, _ = client.head(key)
-    if status == 404:
-        return True, sha, "missing"
-    if status >= 400:
-        return True, sha, f"head failed {status}"
-    if headers.get("x-amz-meta-sha256") == sha:
-        return False, sha, "same sha256"
-    if headers.get("content-length") == str(path.stat().st_size) and not headers.get("x-amz-meta-sha256"):
-        return False, sha, "same size, no metadata"
-    return True, sha, "changed"
+
+def load_manifest():
+    manifest = load_json(MANIFEST_PATH, {}) or {}
+    objects = manifest.get("objects")
+    if not isinstance(objects, dict):
+        objects = {}
+    return objects
+
+
+def write_manifest(cfg, objects):
+    data = {
+        "version": 1,
+        "bucket": cfg.get("bucket") or DEFAULT_BUCKET,
+        "updatedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "objects": objects,
+    }
+    write_json(MANIFEST_PATH, data, indent=2)
+
+
+def list_remote_objects(client, prefixes):
+    remote = {}
+    for prefix in prefixes:
+        remote.update(client.list_objects_v2(prefix))
+    return remote
+
+
+def remote_needs_upload(remote_objects, manifest_objects, key, path, sha):
+    local_size = path.stat().st_size
+    remote = remote_objects.get(key)
+    manifest = manifest_objects.get(key) or {}
+    if not remote:
+        return True, f"missing remote object, local size {local_size}"
+    remote_size = remote.get("size")
+    if remote_size != local_size:
+        return True, f"size changed, remote {remote_size}, local {local_size}"
+    if manifest.get("sha256") and manifest.get("sha256") != sha:
+        return True, "local sha256 changed since last successful sync"
+    if manifest.get("sha256") == sha:
+        return False, "same size and local sha256 unchanged"
+    return False, "same size"
 
 
 def sync_assets(args, cfg, assets):
@@ -343,15 +448,27 @@ def sync_assets(args, cfg, assets):
     cache_control = cfg.get("cache_control") or "public, max-age=31536000, immutable"
     counts = {"checked": 0, "upload": 0, "skip": 0, "fail": 0}
     failures = []
+    total = len(assets)
+    prefixes = sorted({image_prefix, original_prefix})
+    manifest_objects = load_manifest()
+    next_manifest = {}
 
-    for kind, cid, filename, path, _rev in assets:
+    print("listing remote objects", flush=True)
+    remote_objects = list_remote_objects(client, prefixes)
+    print(f"remote objects loaded: {len(remote_objects)}", flush=True)
+
+    if total:
+        print(f"checking local assets: 0/{total}", flush=True)
+
+    for kind, cid, filename, path, sha in assets:
         prefix = image_prefix if kind == "image" else original_prefix
         key = key_for(prefix, cid, filename)
         counts["checked"] += 1
         try:
-            needs_upload, sha, reason = remote_needs_upload(client, key, path)
+            needs_upload, reason = remote_needs_upload(remote_objects, manifest_objects, key, path, sha)
             if not needs_upload:
                 counts["skip"] += 1
+                next_manifest[key] = {"size": path.stat().st_size, "sha256": sha}
                 if args.verbose:
                     print(f"skip {key}: {reason}")
                 continue
@@ -363,11 +480,27 @@ def sync_assets(args, cfg, assets):
             if status not in (200, 201):
                 counts["fail"] += 1
                 failures.append(f"upload failed {key}: {status} {body[:200]!r}")
-            elif args.verbose:
-                print(f"uploaded {key}")
+            else:
+                next_manifest[key] = {"size": path.stat().st_size, "sha256": sha}
+                if args.verbose:
+                    print(f"uploaded {key}")
         except Exception as ex:
             counts["fail"] += 1
             failures.append(f"{key}: {ex}")
+        finally:
+            if total and (counts["checked"] % 250 == 0 or counts["checked"] == total):
+                print(
+                    "progress: "
+                    f"checked {counts['checked']}/{total}, "
+                    f"upload {counts['upload']}, "
+                    f"skip {counts['skip']}, "
+                    f"fail {counts['fail']}",
+                    flush=True,
+                )
+
+    if not args.dry_run and not args.check_only and not failures:
+        write_manifest(cfg, next_manifest)
+        print(f"local sync manifest updated: {MANIFEST_PATH.name}", flush=True)
 
     return counts, failures
 

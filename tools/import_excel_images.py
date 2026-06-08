@@ -386,22 +386,42 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--codex-id", default="suozhang", help="Codex id under site/data, for example suozhang.")
     parser.add_argument("--excel-dir", type=Path, default=None)
+    parser.add_argument("--excel-file", type=Path, action="append", default=[], help="Specific .xlsx file to read. Can be passed multiple times.")
+    parser.add_argument("--only-title", action="append", default=[], help="Import only entries with this title. Can be passed multiple times.")
+    parser.add_argument("--only-entry-id", action="append", default=[], help="Import only this entry id. Can be passed multiple times.")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--limit", type=int, default=0, help="Maximum images to write in --apply mode.")
     parser.add_argument("--prefer", choices=("first", "largest"), default="largest")
     args = parser.parse_args()
 
-    excel_dir = args.excel_dir or default_excel_dir()
-    workbooks = sorted(excel_dir.glob("*.xlsx"))
+    if args.excel_file:
+        workbooks = [path.resolve() for path in args.excel_file]
+        missing = [str(path) for path in workbooks if not path.exists()]
+        if missing:
+            raise SystemExit("Missing Excel file(s): " + ", ".join(missing))
+        excel_dir = None
+    else:
+        excel_dir = args.excel_dir or default_excel_dir()
+        workbooks = sorted(excel_dir.glob("*.xlsx"))
+    if not workbooks:
+        raise SystemExit("No .xlsx files found.")
+
     codex = load_codex(args.codex_id)
     site_image_dir = ROOT / "site" / "images" / args.codex_id
     original_dir = ROOT / "originals" / args.codex_id
+    only_titles = {norm_title(title) for title in args.only_title}
+    only_entry_ids = set(args.only_entry_id)
 
     all_candidates = []
     total_stats = Counter()
     print(f"Codex id: {args.codex_id}")
-    print(f"Excel dir: {excel_dir}")
+    if excel_dir:
+        print(f"Excel dir: {excel_dir}")
+    else:
+        print(f"Excel files: {len(workbooks)}")
+    if only_titles or only_entry_ids:
+        print(f"Entry filter: titles={len(only_titles)} ids={len(only_entry_ids)}")
     for workbook in workbooks:
         candidates, stats = extract_candidates(workbook)
         all_candidates.extend(candidates)
@@ -413,6 +433,12 @@ def main():
         )
 
     matches, unmatched = match_candidates(all_candidates, codex["entries"])
+    pre_filter_matches = len(matches)
+    if only_titles or only_entry_ids:
+        matches = [
+            match for match in matches
+            if match.entry.get("id") in only_entry_ids or norm_title(match.entry.get("title", "")) in only_titles
+        ]
     matched_by_entry = defaultdict(list)
     for match in matches:
         matched_by_entry[match.entry["id"]].append(match)
@@ -431,6 +457,8 @@ def main():
     print(f"image anchors: {total_stats['image_anchors']}")
     print(f"excel candidates: {len(all_candidates)}")
     print(f"matched candidates: {len(matches)}")
+    if only_titles or only_entry_ids:
+        print(f"matched candidates before filter: {pre_filter_matches}")
     print(f"matched unique entries: {len(matched_by_entry)}")
     print(f"ready to import: {len(usable)}")
     print(f"already imaged skipped: {len(already)}")
