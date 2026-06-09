@@ -227,6 +227,10 @@ def tag_match_score(new_tags, old_tags):
         n += 1
     return n
 
+def is_generic_variant_title(title):
+    title = (title or "").strip().rstrip("：:")
+    return title == "原版" or re.match(r"^其他版本\d*$", title) is not None
+
 def assign_stable_ids(cid, items):
     """复用旧 JSON 中的 id，避免修解析规则后把已配图词条整体错位。"""
     old_entries = load_existing_entries(cid)
@@ -267,7 +271,8 @@ def assign_stable_ids(cid, items):
         key = (tuple(item["path"]), item["title"])
         best = None
         best_score = -1
-        for old in old_by_key.get(key, []):
+        candidates = old_by_key.get(key, [])
+        for old in candidates:
             oid = old.get("id")
             if not oid or oid in used:
                 continue
@@ -275,6 +280,11 @@ def assign_stable_ids(cid, items):
             if score > best_score:
                 best = old
                 best_score = score
+
+        # Generic titles appear many times in one path. If their tags are unrelated,
+        # mint a new id instead of carrying an old image onto a different variant.
+        if best is not None and is_generic_variant_title(item["title"]) and best_score < 32:
+            best = None
 
         eid = best.get("id") if best is not None else fresh_id()
         used.add(eid)
