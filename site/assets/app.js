@@ -797,7 +797,8 @@ function mediaPath(kind, e) {
     return encodeAssetPath(file);
   }
   const prefix = kind === 'original' ? state.media.originalPrefix : state.media.imagePrefix;
-  return [prefix || (kind === 'original' ? 'originals' : 'images'), state.codex.id, file]
+  const assetCodexId = e.assetCodexId || state.codex.id;
+  return [prefix || (kind === 'original' ? 'originals' : 'images'), assetCodexId, file]
     .map(part => encodeURIComponent(part).replace(/%2F/g, '/'))
     .join('/');
 }
