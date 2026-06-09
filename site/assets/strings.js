@@ -358,11 +358,12 @@ function makeCard(p) {
     node.querySelector('.card-img-wrap')?.appendChild(badge);
   }
 
+  const cnt = node.querySelector('.card-count');
+  if (cnt && e.images && e.images.length) cnt.textContent = e.images.length + ' 张图';
+
   const img = vimg(e);
   if (img) {
     setupImage(node, p, img);
-    const cnt = node.querySelector('.image-count');
-    if (cnt) cnt.textContent = e.images.length + ' 图';
   } else {
     node.classList.add('no-img');
   }

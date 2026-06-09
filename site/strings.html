@@ -166,13 +166,6 @@ body.dark .card-img-wrap.loading::before{background:linear-gradient(110deg,trans
   padding:2px 8px;font-size:10px;font-weight:700;border-radius:6px;
   box-shadow:0 1px 4px rgba(0,0,0,.25)
 }
-.image-count{
-  position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.55);
-  color:#fff;font-size:10px;padding:3px 10px;border-radius:999px;
-  font-weight:600;backdrop-filter:blur(6px);
-  border:1px solid rgba(255,255,255,.15);letter-spacing:.3px
-}
-
 .card-body{padding:13px 15px 14px}
 .card-title{font-size:15px;font-weight:700;line-height:1.35;margin-bottom:9px;
   font-family:var(--font-serif);
@@ -181,8 +174,9 @@ body.dark .card-img-wrap.loading::before{background:linear-gradient(110deg,trans
 .card-tag{font-size:10.5px;padding:3px 10px;border-radius:7px;background:var(--tagbg);
   color:var(--muted);font-weight:500;transition:background .12s}
 .card:hover .card-tag{background:var(--tagbg-hover)}
-.card-foot{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted)}
-.card-hint{color:var(--accent);font-weight:600;opacity:0;transition:opacity .18s;white-space:nowrap;font-size:10px;overflow:hidden;text-overflow:ellipsis;max-width:80px}
+.card-foot{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);gap:8px}
+.card-count{font-size:10px;color:var(--muted);opacity:.75}
+.card-hint{color:var(--accent);font-weight:600;opacity:0;transition:opacity .18s;font-size:10px;white-space:nowrap}
 .card:hover .card-hint{opacity:1}
 
 .detail-overlay{
@@ -336,12 +330,12 @@ body.dark .prompt-box{background:#0b0f17;color:#c4c9d4;border-color:rgba(255,255
     <div class="card-img-wrap" hidden>
       <img class="card-img" loading="lazy" alt="">
       <button class="zoom-btn">🔍</button>
-      <div class="image-count"></div>
     </div>
     <div class="card-body">
       <div class="card-title"></div>
       <div class="card-tags-row"></div>
       <div class="card-foot">
+        <span class="card-count"></span>
         <span class="card-hint">点击查看</span>
       </div>
     </div>

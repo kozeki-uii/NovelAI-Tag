@@ -55,6 +55,9 @@ header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px
 .tree-item.collapsed>.tree-row .tw-arrow{transform:rotate(-90deg)}
 .tw-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tw-count{color:var(--muted);font-size:11px;flex:none}
+.tw-del{width:18px;height:18px;border:none;background:transparent;color:var(--muted);font-size:12px;cursor:pointer;border-radius:4px;display:none;align-items:center;justify-content:center;flex:none;line-height:1;opacity:0;transition:all .12s}
+.tree-row:hover .tw-del{display:flex;opacity:1}
+.tree-row:not(.active) .tw-del:hover{background:var(--red);color:#fff}
 .tree-children{margin-left:14px;border-left:1px solid var(--line);padding-left:6px}
 .tree-item.collapsed>.tree-children{display:none}
 
@@ -258,7 +261,7 @@ function renderTree(){
   wrap.innerHTML='';
   const all=document.createElement('div');
   all.className='tree-item';
-  all.innerHTML=`<div class="tree-row active" data-path=""><span class="tw-arrow"></span><span class="tw-name">全部</span><span class="tw-count">${root.count}</span></div>`;
+  all.innerHTML=`<div class="tree-row active" data-path=""><span class="tw-arrow"></span><span class="tw-name">全部</span><span class="tw-count">${root.count}</span><button class="tw-del" style="visibility:hidden;pointer-events:none">✕</button></div>`;
   all.querySelector('.tree-row').onclick=()=>selectPath([],all.querySelector('.tree-row'));
   wrap.appendChild(all);
   buildNodes(root.children,wrap,0);
@@ -269,12 +272,16 @@ function buildNodes(nodes,parent,depth){
     const item=document.createElement('div');
     item.className='tree-item'+(depth>=1?' collapsed':'');
     const hasKids=nd.children&&nd.children.length>0;
+    const pstr=nd.path.join('/');
     item.innerHTML=
-      `<div class="tree-row" data-path="${nd.path.join('/')}">`+
+      `<div class="tree-row" data-path="${pstr}">`+
       `<span class="tw-arrow">${hasKids?'▾':''}</span>`+
       `<span class="tw-name">${esc(nd.name)}</span>`+
-      `<span class="tw-count">${nd.count}</span></div>`;
+      `<span class="tw-count">${nd.count}</span>`+
+      `<button class="tw-del" title="删除目录">✕</button></div>`;
     const row=item.querySelector('.tree-row');
+    const delBtn=row.querySelector('.tw-del');
+    delBtn.onclick=ev=>{ev.stopPropagation();deleteCategory(pstr);};
     if(hasKids){
       row.querySelector('.tw-arrow').onclick=ev=>{ev.stopPropagation();item.classList.toggle('collapsed');};
       const kids=document.createElement('div');kids.className='tree-children';
@@ -509,6 +516,19 @@ function createCategory(){
   categories.push(val);categories.sort();
   renderTree();$('#newCatInput').value='';
   toast('已添加目录: '+val);
+}
+
+function deleteCategory(path){
+  const has=entries.some(e=>(e.category||[]).join('/')===path);
+  if(has){toast('该目录下有条目，请先移动或删除条目');return;}
+  const sub=path+'/';
+  const hasSub=entries.some(e=>(e.category||[]).join('/').startsWith(sub));
+  if(hasSub){toast('该目录下有子条目，请先移动或删除');return;}
+  const idx=categories.indexOf(path);
+  if(idx<0) return;
+  categories.splice(idx,1);
+  renderTree();
+  toast('已删除目录: '+path);
 }
 
 $('#addBtn').onclick=()=>openForm(null);
