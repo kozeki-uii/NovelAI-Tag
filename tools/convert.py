@@ -23,13 +23,17 @@ ARCHIVE_DIR = os.path.join(ROOT, "法典源_已转换")
 ARCHIVE_MANIFEST = os.path.join(ARCHIVE_DIR, "processed_sources.json")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# 已知法典 → 短 id（其余用文件名哈希）
+# 已知法典 → 固定 id（其余用文件名哈希）
 ID_MAP = [
     ("所长常规", "suozhang"),   # 原「所长常规」法典固定用 suozhang（已配图，勿改）
     ("所长色色NovalAI个人法典（上）", "codex_6e699406"),
     ("所长色色NovalAI个人法典(上)", "codex_6e699406"),
+    ("所长色色NovelAI个人法典（上）", "codex_6e699406"),
+    ("所长色色NovelAI个人法典(上)", "codex_6e699406"),
     ("所长色色NovalAI个人法典（下）", "codex_8489ac52"),
     ("所长色色NovalAI个人法典(下)", "codex_8489ac52"),
+    ("所长色色NovelAI个人法典（下）", "codex_8489ac52"),
+    ("所长色色NovelAI个人法典(下)", "codex_8489ac52"),
 ]
 META_OVERRIDES = {
     "suozhang": {"author": "戒红所"},
@@ -40,10 +44,25 @@ META_OVERRIDES = {
 IMG_EXTS = ["jpg", "jpeg", "png", "webp", "gif", "avif"]
 MAXDIM = 1100
 
+def normalized_stem(stem):
+    return (
+        re.sub(r"\s+", "", stem)
+        .replace("（", "(")
+        .replace("）", ")")
+        .lower()
+        .replace("novelai", "novalai")
+    )
+
 def codex_id(stem):
+    norm = normalized_stem(stem)
     for key, cid in ID_MAP:
-        if key in stem:
+        if normalized_stem(key) in norm:
             return cid
+    if "所长色色" in stem:
+        if "(上)" in norm:
+            return "codex_6e699406"
+        if "(下)" in norm:
+            return "codex_8489ac52"
     return "codex_" + hashlib.md5(stem.encode("utf-8")).hexdigest()[:8]
 
 def parse_meta(stem):
