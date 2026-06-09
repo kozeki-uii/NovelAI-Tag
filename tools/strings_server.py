@@ -8,14 +8,14 @@
   POST /__strings__?action=upload → 上传图片并压缩
 用法：python tools/strings_server.py
 """
-import http.server, socketserver, json, os, io, threading, urllib.parse
+import http.server, socketserver, json, os, io, threading, urllib.parse, time
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SITE = os.path.join(ROOT, "site")
 DATA = os.path.join(SITE, "data")
-STRINGS_JSON = os.path.join(DATA, "strings.json")
 EDITOR_HTML = os.path.join(os.path.dirname(__file__), "strings_editor.html")
+STRINGS_INDEX = os.path.join(DATA, "strings_index.json")
 MAXDIM = 1100
 PORT = 8768
 LOCK = threading.Lock()
@@ -50,18 +50,31 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self._handle_save()
             elif action == "upload":
                 self._handle_upload()
+            elif action == "new-collection":
+                self._handle_new_collection()
+            elif action == "delete-collection":
+                self._handle_delete_collection()
             else:
                 self.send_error(404)
             return
         self.send_error(404)
 
+    def _resolve_file(self, qs):
+        fn = qs.get("file", ["strings.json"])[0]
+        fn = os.path.basename(fn)
+        if not fn.endswith(".json"):
+            raise ValueError("invalid file")
+        return os.path.join(DATA, fn)
+
     def _handle_save(self):
         try:
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1]) if "?" in self.path else {}
+            target = self._resolve_file(qs)
             ln = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(ln))
             self._normalize_images(data)
             with LOCK:
-                with open(STRINGS_JSON, "w", encoding="utf-8") as f:
+                with open(target, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
             self._serve_json({"ok": True})
         except Exception as ex:
@@ -75,6 +88,78 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             for i, img in enumerate(imgs):
                 if isinstance(img, str):
                     imgs[i] = {"file": img, "label": "gallery"}
+
+    def _handle_new_collection(self):
+        try:
+            ln = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(ln))
+            name = body.get("name", "").strip()
+            if not name:
+                self._serve_json({"ok": False, "error": "名称不能为空"}, 400)
+                return
+
+            fid = "str_" + hex(int(time.time() * 1000) % 0xFFFFF)[2:]
+            fn = f"strings_{fid}.json"
+            fp = os.path.join(DATA, fn)
+            if os.path.exists(fp):
+                self._serve_json({"ok": False, "error": "该名称对应的文件已存在，换个名字试试"}, 400)
+                return
+
+            scaffold = {
+                "title": name,
+                "author": "",
+                "categories": [],
+                "entries": []
+            }
+            with LOCK:
+                with open(fp, "w", encoding="utf-8") as f:
+                    json.dump(scaffold, f, ensure_ascii=False, indent=2)
+
+                idx_data = {"collections": []}
+                if os.path.exists(STRINGS_INDEX):
+                    with open(STRINGS_INDEX, "r", encoding="utf-8") as f:
+                        idx_data = json.load(f)
+                idx_data.setdefault("collections", []).append({
+                    "id": fid,
+                    "name": name,
+                    "author": "",
+                    "file": fn
+                })
+                with open(STRINGS_INDEX, "w", encoding="utf-8") as f:
+                    json.dump(idx_data, f, ensure_ascii=False, indent=2)
+
+            self._serve_json({"ok": True, "file": fn, "name": name})
+        except Exception as ex:
+            self._serve_json({"ok": False, "error": str(ex)}, 500)
+
+    def _handle_delete_collection(self):
+        try:
+            ln = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(ln))
+            target_file = body.get("file", "").strip()
+            if not target_file:
+                self._serve_json({"ok": False, "error": "缺少 file 参数"}, 400)
+                return
+            target_file = os.path.basename(target_file)
+            if not target_file.endswith(".json") or target_file == "strings_index.json":
+                self._serve_json({"ok": False, "error": "invalid file"}, 400)
+                return
+
+            fp = os.path.join(DATA, target_file)
+            with LOCK:
+                if os.path.exists(STRINGS_INDEX):
+                    with open(STRINGS_INDEX, "r", encoding="utf-8") as f:
+                        idx_data = json.load(f)
+                    idx_data["collections"] = [c for c in idx_data.get("collections", []) if c.get("file") != target_file]
+                    with open(STRINGS_INDEX, "w", encoding="utf-8") as f:
+                        json.dump(idx_data, f, ensure_ascii=False, indent=2)
+
+                if os.path.exists(fp):
+                    os.remove(fp)
+
+            self._serve_json({"ok": True})
+        except Exception as ex:
+            self._serve_json({"ok": False, "error": str(ex)}, 500)
 
     def _handle_upload(self):
         try:
@@ -95,6 +180,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             entry_id = None
             existing_images = []
             label = "gallery"
+            target_file = "strings.json"
 
             for part in parts:
                 name = part.get("name")
@@ -106,10 +192,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     existing_images = json.loads(part["data"].decode("utf-8"))
                 elif name == "label":
                     label = part["data"].decode("utf-8")
+                elif name == "stringsFile":
+                    target_file = part["data"].decode("utf-8")
 
             if not image_data or not entry_id:
                 self._serve_json({"ok": False, "error": "缺少参数"}, 400)
                 return
+
+            target_file = os.path.basename(target_file)
+            if not target_file.endswith(".json"):
+                self._serve_json({"ok": False, "error": "invalid file"}, 400)
+                return
+            target = os.path.join(DATA, target_file)
 
             ext = self._guess_ext(image_data)
             tdir = os.path.join(SITE, "images", "strings")
@@ -126,14 +220,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             existing_images.append({"file": tn, "label": label})
 
             with LOCK:
-                if os.path.exists(STRINGS_JSON):
-                    with open(STRINGS_JSON, "r", encoding="utf-8") as f:
+                if os.path.exists(target):
+                    with open(target, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     for e in data.get("entries", []):
                         if e.get("id") == entry_id:
                             e["images"] = existing_images
                             break
-                    with open(STRINGS_JSON, "w", encoding="utf-8") as f:
+                    with open(target, "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
 
             self._serve_json({"ok": True, "images": existing_images, "file": tn})

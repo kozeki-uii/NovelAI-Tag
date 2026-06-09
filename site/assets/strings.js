@@ -359,7 +359,7 @@ function makeCard(p) {
   }
 
   const cnt = node.querySelector('.card-count');
-  if (cnt && e.images && e.images.length) cnt.textContent = e.images.length + ' 张图';
+  if (cnt) cnt.textContent = (e.images && e.images.length) ? e.images.length + ' 张图' : '无例图';
 
   const img = vimg(e);
   if (img) {

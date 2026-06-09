@@ -36,6 +36,8 @@ header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px
 .btn-danger{border-color:var(--red);color:var(--red)}
 .btn-danger:hover{background:var(--red);color:#fff}
 .btn-sm{padding:5px 12px;font-size:11px}
+.ed-pick select{padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;font-weight:600;background:var(--panel);color:var(--text);cursor:pointer;font-family:inherit;min-width:140px}
+.ed-pick select:focus{outline:none;border-color:var(--accent)}
 .spacer{flex:1}
 .status{font-size:12px;color:var(--muted);white-space:nowrap}
 
@@ -138,6 +140,11 @@ header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:14px
 <header>
   <div class="title">NAI<span>Prompt 编辑器</span></div>
   <div class="spacer"></div>
+  <label class="ed-pick" title="切换编辑库">
+    <select id="libSelect"></select>
+  </label>
+  <button class="btn btn-sm" id="newLibBtn" title="新建合集">+</button>
+  <button class="btn btn-sm btn-danger" id="delLibBtn" title="删除当前合集">删</button>
   <button class="btn btn-primary" id="saveAllBtn">保存全部</button>
   <span class="status">共 <b id="total">0</b> 条 · 已修改: <b id="dirty" style="color:var(--accent)">否</b></span>
 </header>
@@ -198,6 +205,8 @@ let entries=[],categories=[];
 let dirty=false,editId=null,uploadFiles=[];
 let removedOld=[],activePath=[];
 let imgLabelCache={};
+let collections=[],currentFile='strings.json';
+const COLL_FILE='data/strings_index.json';
 
 const LABELS=['face','scene','nsfw','gallery'];
 const LABEL_NAMES={face:'面部',scene:'场景',nsfw:'NSFW',gallery:'图库'};
@@ -205,13 +214,73 @@ const LABEL_NAMES={face:'面部',scene:'场景',nsfw:'NSFW',gallery:'图库'};
 function normImg(img){return typeof img==='string'?{file:img,label:'gallery'}:img;}
 function imgFile(img){return typeof img==='string'?img:img.file;}
 
-async function load(){
+async function loadCollections(){
   try{
-    const r=await fetch('data/strings.json?_='+Date.now());
+    const r=await fetch(COLL_FILE+'?_='+Date.now());
+    if(!r.ok) throw new Error();
+    const idx=await r.json();
+    collections=idx.collections||[{id:'default',name:'NAI Prompt',author:'小雫',file:'strings.json'}];
+    const sel=$('#libSelect');
+    sel.innerHTML=collections.map(c=>`<option value="${c.file}">${esc(c.name)}</option>`).join('');
+    const saved=localStorage.getItem('strings_editor_file');
+    if(saved&&collections.some(c=>c.file===saved)){sel.value=saved;currentFile=saved;}
+    else{currentFile=sel.value;}
+    sel.onchange=switchLibrary;
+  }catch(e){}
+}
+
+async function addCollection(){
+  let name=prompt('请输入新合集名称（如：小雫的画风串合集）');
+  if(!name||!name.trim()) return;
+  name=name.trim();
+  try{
+    const r=await fetch(API+'?action=new-collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+    const j=await r.json();
+    if(!j.ok){toast('创建失败: '+j.error);return;}
+    await loadCollections();
+    currentFile=j.file;
+    $('#libSelect').value=currentFile;
+    localStorage.setItem('strings_editor_file',currentFile);
+    await loadData(currentFile);
+    toast('已创建合集: '+name);
+  }catch(e){toast('创建失败');}
+}
+
+async function deleteCollection(){
+  if(collections.length<=1){toast('至少保留一个合集');return;}
+  const cur=collections.find(c=>c.file===currentFile);
+  const name=cur?cur.name:currentFile;
+  if(!confirm('确定删除合集「'+name+'」？\nJSON 文件将被删除，图片文件保留。')) return;
+  try{
+    const r=await fetch(API+'?action=delete-collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file:currentFile})});
+    const j=await r.json();
+    if(!j.ok){toast('删除失败: '+j.error);return;}
+    await loadCollections();
+    currentFile=$('#libSelect').value;
+    localStorage.setItem('strings_editor_file',currentFile);
+    await loadData(currentFile);
+    toast('已删除合集: '+name);
+  }catch(e){toast('删除失败');}
+}
+
+async function switchLibrary(){
+  if(dirty&&!confirm('你有未保存的修改，切换库将丢失修改。确定继续？')){
+    $('#libSelect').value=currentFile;return;
+  }
+  currentFile=$('#libSelect').value;
+  localStorage.setItem('strings_editor_file',currentFile);
+  await loadData(currentFile);
+}
+
+async function loadData(file){
+  try{
+    const r=await fetch('data/'+file+'?_='+Date.now());
     if(!r.ok) throw new Error();
     const data=await r.json();
     entries=(data.entries||[]).map(e=>({...e,images:(e.images||[]).map(normImg)}));
     categories=data.categories||collectCategories();
+    dirty=false;$('#dirty').textContent='否';
+    activePath=[];
     $('#total').textContent=entries.length;
     renderTree();renderList();
   }catch(e){console.error(e);}
@@ -477,8 +546,9 @@ async function uploadImages(entry){
     fd.append('entryId',entry.id);
     fd.append('existingImages',JSON.stringify(entry.images));
     fd.append('label',imgLabelCache[f.name]||'gallery');
+    fd.append('stringsFile',currentFile);
     try{
-      const r=await fetch(API+'?action=upload',{method:'POST',body:fd});
+      const r=await fetch(API+'?action=upload&file='+encodeURIComponent(currentFile),{method:'POST',body:fd});
       const j=await r.json();
       if(j.ok){
         const imgs=(j.images||[]).map(normImg);
@@ -496,8 +566,8 @@ async function saveAll(){
   syncCategories();
   const data={title:'NAI Prompt',author:'小雫',categories,entries:entries.map(e=>({...e,images:e.images||[]}))};
   try{
-    const r=await fetch(API+'?action=save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-    if(r.ok){dirty=false;$('#dirty').textContent='否';toast('已保存到 strings.json');}
+    const r=await fetch(API+'?action=save&file='+encodeURIComponent(currentFile),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    if(r.ok){dirty=false;$('#dirty').textContent='否';toast('已保存到 '+currentFile);}
     else toast('保存失败');
   }catch(e){toast('保存失败: '+e.message);}
 }
@@ -533,13 +603,15 @@ function deleteCategory(path){
 
 $('#addBtn').onclick=()=>openForm(null);
 $('#saveAllBtn').onclick=saveAll;
+$('#newLibBtn').onclick=addCollection;
+$('#delLibBtn').onclick=deleteCollection;
 $('#newCatBtn').onclick=createCategory;
 $('#newCatInput').onkeydown=ev=>{if(ev.key==='Enter') createCategory();};
 let st;
 $('#search').oninput=()=>{clearTimeout(st);st=setTimeout(()=>renderList($('#search').value),150);};
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 
-load();
+loadCollections().then(()=>loadData(currentFile));
 </script>
 </body>
 </html>
