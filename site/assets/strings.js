@@ -20,6 +20,8 @@ const state = {
   colN: 0,
   itemW: 0,
   activePath: null,
+  activeCollection: null,
+  collections: [],
   viewMode: 'all',
   query: '',
   showNSFW: localStorage.getItem('strings-nsfw') === 'true',
@@ -37,21 +39,53 @@ async function init() {
   updateNSFWBtn();
 
   try {
-    const data = await fetch('data/strings.json?_=' + Date.now()).then(r => r.json());
+    const idx = await fetch('data/strings_index.json?_=' + Date.now()).then(r => r.json());
+    state.collections = idx.collections || [];
+
+    const sel = $('#stringsSelect');
+    sel.innerHTML = state.collections.map((c, i) =>
+      `<option value="${i}">${escHtml(c.name)}</option>`
+    ).join('');
+    sel.onchange = () => {
+      const ci = parseInt(sel.value);
+      if (state.collections[ci]) {
+        state.activeCollection = state.collections[ci];
+        localStorage.setItem('strings-collection', state.activeCollection.id);
+        loadCollection(state.activeCollection.file);
+      }
+    };
+
+    const lastId = localStorage.getItem('strings-collection');
+    let idx2 = 0;
+    if (lastId) {
+      const found = state.collections.findIndex(c => c.id === lastId);
+      if (found >= 0) idx2 = found;
+    }
+    sel.value = String(idx2);
+    state.activeCollection = state.collections[idx2];
+    await loadCollection(state.activeCollection.file);
+
+  } catch (e) {
+    console.error(e);
+    const empty = $('#empty');
+    if (empty) { empty.hidden = false; const sp = empty.querySelector('span'); if (sp) sp.textContent = '数据加载失败，请检查配置'; }
+  }
+}
+
+async function loadCollection(file) {
+  try {
+    const data = await fetch('data/' + file + '?_=' + Date.now()).then(r => r.json());
     state.data = data;
     state.entries = (data.entries || []).map(e => ({
       ...e,
       images: (e.images || []).map(normImg)
     }));
-
+    state.activePath = null;
     buildTree();
     updateNSFWTooltip();
     applyFilter({ scrollUp: true });
-
   } catch (e) {
-    console.error(e);
-    const empty = $('#empty');
-    if (empty) { empty.hidden = false; const sp = empty.querySelector('span'); if (sp) sp.textContent = '数据加载失败，请检查 strings.json'; }
+    console.error('Failed to load', file, e);
   }
 }
 

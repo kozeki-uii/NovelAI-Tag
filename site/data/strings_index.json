@@ -1,0 +1,5 @@
+{
+  "collections": [
+    {"id": "default", "name": "NAI Prompt", "author": "小雫", "file": "strings.json"}
+  ]
+}
