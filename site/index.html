@@ -21,11 +21,24 @@
     <input id="search" type="search" placeholder="搜索词条或 tag（中 / 英）…" autocomplete="off">
   </div>
 
-  <label class="toggle" title="只显示已配图的词条">
-    <input type="checkbox" id="onlyImaged"><span>只看有图</span>
+  <label class="filter-btn" title="只看有图" aria-label="只看有图">
+    <input type="checkbox" id="onlyImaged">
+    <span class="filter-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="5" width="18" height="14" rx="2.5"/>
+        <circle cx="8.5" cy="10" r="1.6"/>
+        <path d="m4.5 17 4.8-4.8a1.5 1.5 0 0 1 2.1 0L16.2 17"/>
+        <path d="m13.8 14.6 1.4-1.4a1.5 1.5 0 0 1 2.1 0L20 16"/>
+      </svg>
+    </span>
   </label>
-  <label class="toggle" title="只显示收藏的词条">
-    <input type="checkbox" id="onlyFav"><span>⭐ 收藏</span>
+  <label class="filter-btn" title="只看收藏" aria-label="只看收藏">
+    <input type="checkbox" id="onlyFav">
+    <span class="filter-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path d="m12 3.8 2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6L7.1 19l.9-5.5-4-3.9 5.5-.8L12 3.8Z"/>
+      </svg>
+    </span>
   </label>
   <div class="topbar-actions">
     <a href="/strings.html" class="nav-link">画风串</a>
