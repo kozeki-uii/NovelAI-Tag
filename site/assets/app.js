@@ -435,6 +435,20 @@ function scheduleVirtualUpdate() {
   });
 }
 
+function masonryViewport(m) {
+  const rect = m.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const totalHeight = m.offsetHeight || parseFloat(m.style.height) || 0;
+  const maxTop = Math.max(0, totalHeight - viewportHeight);
+  const rawTop = -rect.top;
+  return {
+    rect,
+    viewportHeight,
+    rawTop,
+    top: clamp(rawTop, 0, maxTop),
+  };
+}
+
 function updateVirtualCards(force = false) {
   const m = $('#masonry');
   if (!m || !state.placements.length) {
@@ -442,9 +456,9 @@ function updateVirtualCards(force = false) {
     return;
   }
 
-  const rect = m.getBoundingClientRect();
-  const viewportTop = -rect.top;
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+  const view = masonryViewport(m);
+  const viewportTop = view.top;
+  const viewportHeight = view.viewportHeight;
   const rangeTop = Math.max(0, viewportTop - viewportHeight * VIRTUAL_BUFFER_UP);
   const rangeBottom = viewportTop + viewportHeight * (1 + VIRTUAL_BUFFER_DOWN);
   const next = new Set();
@@ -466,6 +480,11 @@ function updateVirtualCards(force = false) {
 
   for (const [index, node] of state.nodes) {
     if (next.has(index)) continue;
+    if (force && relayoutAnimating) {
+      const placement = state.placements[index];
+      if (placement) updateCardPosition(node, placement);
+      continue;
+    }
     cleanupCard(node);
     node.remove();
     state.nodes.delete(index);
@@ -659,6 +678,7 @@ function startRelayoutAnimation() {
   relayoutAnimTimer = window.setTimeout(() => {
     relayoutAnimating = false;
     m.classList.remove('is-relayouting');
+    updateVirtualCards(true);
   }, RELAYOUT_ANIM_MS + 80);
 }
 

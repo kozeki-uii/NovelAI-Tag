@@ -305,13 +305,26 @@ function scheduleVirtual() {
   vRaf = requestAnimationFrame(() => { vRaf = 0; updateVirtualCards(); });
 }
 
+function clampNum(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+
+function masonryViewport(m) {
+  const rect = m.getBoundingClientRect();
+  const vH = window.innerHeight || document.documentElement.clientHeight;
+  const totalH = m.offsetHeight || parseFloat(m.style.height) || 0;
+  const maxTop = Math.max(0, totalH - vH);
+  const rawTop = -rect.top;
+  return { rect, vH, rawTop, top: clampNum(rawTop, 0, maxTop) };
+}
+
 function updateVirtualCards(force = false) {
   const m = $('#masonry');
   if (!m || !state.placements.length) { state.rendered = 0; return; }
 
-  const rect = m.getBoundingClientRect();
-  const vTop = -rect.top;
-  const vH = window.innerHeight || document.documentElement.clientHeight;
+  const view = masonryViewport(m);
+  const vTop = view.top;
+  const vH = view.vH;
   const rTop = Math.max(0, vTop - vH * VIRT_BUF_UP);
   const rBot = vTop + vH * (1 + VIRT_BUF_DOWN);
   const next = new Set();
@@ -331,6 +344,11 @@ function updateVirtualCards(force = false) {
 
   for (const [idx, node] of state.nodes) {
     if (next.has(idx)) continue;
+    if (force && relayoutAnimating) {
+      const placement = state.placements[idx];
+      if (placement) updateCardPos(node, placement);
+      continue;
+    }
     cleanupCard(node);
     node.remove();
     state.nodes.delete(idx);
@@ -586,16 +604,30 @@ function updateNSFWTooltip() {
 
 let relayoutTimer = 0;
 let lastRelayout = 0;
+let relayoutAnimTimer = 0;
+let relayoutAnimating = false;
+
+function startRelayoutAnimation(anim) {
+  const m = $('#masonry');
+  if (!anim || !m || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  relayoutAnimating = true;
+  m.classList.add('relayout');
+  void m.offsetWidth;
+  clearTimeout(relayoutAnimTimer);
+  relayoutAnimTimer = setTimeout(() => {
+    relayoutAnimating = false;
+    m.classList.remove('relayout');
+    updateVirtualCards(true);
+  }, 480);
+}
+
 function scheduleRelayout(anim = true) {
   if (relayoutTimer) return;
   const delay = Math.max(0, 60 - (performance.now() - lastRelayout));
   relayoutTimer = setTimeout(() => {
     relayoutTimer = 0;
     lastRelayout = performance.now();
-    if (anim) {
-      const m = $('#masonry');
-      if (m) { m.classList.add('relayout'); void m.offsetWidth; }
-    }
+    startRelayoutAnimation(anim);
     computeLayout();
     updateVirtualCards(true);
   }, delay);
