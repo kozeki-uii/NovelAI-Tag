@@ -1,5 +1,5 @@
 # 法典图鉴 · NovelAI 提示词图鉴
-![alt text](image-1.png)
+![alt text](image.png)
 
 ## 📚简介
 [示例站点](https://novelai-tag.pages.dev/)
