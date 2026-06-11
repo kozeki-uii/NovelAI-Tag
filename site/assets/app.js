@@ -64,6 +64,7 @@ async function init() {
     const sel = $('#codexSelect');
     sel.innerHTML = codexes.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('');
     sel.onchange = () => loadCodex(sel.value);
+    setupCodexPicker();
     bindUI();
     if (codexes.length) await loadCodex(codexes[0].id);
     else setLoading('还没有可显示的法典数据');
@@ -71,6 +72,45 @@ async function init() {
     console.error(ex);
     setLoading('加载失败，请刷新页面重试');
   }
+}
+
+/* 自绘法典下拉菜单（原生 select 隐藏，仅作值同步） */
+function setupCodexPicker() {
+  const sel = $('#codexSelect');
+  const btn = $('#codexBtn');
+  const menu = $('#codexMenu');
+  if (!btn || !menu) return;
+  const open = () => { menu.hidden = false; btn.classList.add('open'); btn.setAttribute('aria-expanded', 'true'); };
+  const close = () => { menu.hidden = true; btn.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); };
+  menu.innerHTML = '';
+  for (const c of state.codexes) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'codex-item';
+    item.dataset.id = c.id;
+    item.setAttribute('role', 'option');
+    item.innerHTML = `<span class="ci-name">${esc(c.title)}</span>` +
+      '<svg class="ck" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>';
+    item.onclick = () => {
+      close();
+      if (sel.value !== c.id) {
+        sel.value = c.id;
+        loadCodex(c.id);
+      }
+    };
+    menu.appendChild(item);
+  }
+  btn.onclick = ev => {
+    ev.stopPropagation();
+    if (menu.hidden) open();
+    else close();
+  };
+  document.addEventListener('click', ev => {
+    if (!menu.hidden && !menu.contains(ev.target)) close();
+  });
+  window.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && !menu.hidden) close();
+  });
 }
 
 async function loadMedia() {
@@ -81,18 +121,28 @@ async function loadMedia() {
   return {};
 }
 
+let codexLoadSeq = 0;
 async function loadCodex(id) {
+  const seq = ++codexLoadSeq;
   setLoading('正在加载词条数据…');
   clearMasonry();
   const meta = state.codexes.find(c => c.id === id) || { id };
-  state.codex = await fetchCodex(meta);
+  const codex = await fetchCodex(meta);
+  if (seq !== codexLoadSeq) return;
+  state.codex = codex;
   const c = state.codex;
   $('#codexTitle').textContent = c.title;
   $('#codexMeta').textContent = `${c.author ? c.author + ' · ' : ''}${c.version} · ${c.entryCount} 条`;
+  const codexBtnText = $('#codexBtnText');
+  if (codexBtnText) codexBtnText.textContent = c.title;
+  document.querySelectorAll('#codexMenu .codex-item').forEach(it => {
+    it.classList.toggle('active', it.dataset.id === c.id);
+  });
   state.activePath = [];
   state.query = '';
   $('#search').value = '';
   renderTree();
+  renderCodexHeader();
   applyFilter({ resetScroll: true });
   setLoading('');
 }
@@ -364,6 +414,52 @@ function updateResultBar() {
   box.appendChild(count);
 
   $('#empty').hidden = n > 0;
+  updateRailActive();
+}
+
+/* ---------------- 法典横幅 / 分类轨道 ---------------- */
+function renderCodexHeader() {
+  const c = state.codex;
+  const banner = $('#codexBanner');
+  if (!banner) return;
+  const cover = c.entries.find(hasEntryImage);
+  const pct = c.entryCount ? Math.round((c.imagedCount / c.entryCount) * 100) : 0;
+  banner.innerHTML =
+    `<div class="banner-cover">${cover ? `<img src="${esc(thumbUrl(cover))}" alt="">` : ''}</div>` +
+    `<div class="banner-info">` +
+    `<div class="banner-title">${esc(c.title)}</div>` +
+    `<div class="banner-meta">${esc(c.author || '')}${c.author ? ' · ' : ''}${esc(c.version || '')}</div>` +
+    `<div class="banner-progress"><div class="bp-track"><div class="bp-fill" style="width:${pct}%"></div></div>` +
+    `<span class="bp-text">${c.imagedCount} / ${c.entryCount} 已配图</span></div>` +
+    `</div>`;
+  const rail = $('#chipRail');
+  if (!rail) return;
+  rail.innerHTML = '';
+  const mkChip = (label, path, count, hue) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'rail-chip';
+    chip.dataset.path = path.join('\u0001');
+    chip.innerHTML = `<span class="rc-dot" style="background:${hue}"></span>${esc(label)}<span class="rc-n">${count}</span>`;
+    chip.onclick = () => selectPathByPath(path);
+    rail.appendChild(chip);
+  };
+  mkChip('全部', [], c.entryCount, 'var(--accent)');
+  for (const nd of c.tree) {
+    let h = 0;
+    for (const ch of nd.name) h = (h * 31 + ch.codePointAt(0)) % 360;
+    mkChip(nd.name, [nd.name], nd.count, `hsl(${h},58%,52%)`);
+  }
+  updateRailActive();
+}
+
+function updateRailActive() {
+  const rail = $('#chipRail');
+  if (!rail) return;
+  const head = state.query.trim() ? null : (state.activePath[0] || '');
+  rail.querySelectorAll('.rail-chip').forEach(ch => {
+    ch.classList.toggle('active', head !== null && (ch.dataset.path || '') === head);
+  });
 }
 
 /* ---------------- 虚拟瀑布流 ---------------- */
@@ -982,6 +1078,15 @@ function bindUI() {
     sidebar.classList.toggle('closed');
     localStorage.setItem('fadian-sidebar', sidebar.classList.contains('closed') ? 'closed' : 'open');
   };
+
+  /* 设置悬浮框：占位设置，开关三件套（按钮/遮罩/Esc） */
+  const settingsMask = $('#settings');
+  $('#settingsBtn').onclick = () => { settingsMask.hidden = false; };
+  $('#settingsClose').onclick = () => { settingsMask.hidden = true; };
+  settingsMask.onclick = ev => { if (ev.target === settingsMask) settingsMask.hidden = true; };
+  window.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape' && !settingsMask.hidden) settingsMask.hidden = true;
+  });
   $('#lightbox').onclick = closeLightbox;
   $('#lightboxPanel').onclick = ev => ev.stopPropagation();
   $('#lightboxClose').onclick = closeLightbox;
@@ -1013,6 +1118,14 @@ function bindUI() {
     setTopbarHidden(dy > 0 && y > 120);
   }, { passive: true });
   searchInput.addEventListener('focus', () => setTopbarHidden(false));
+
+  /* 分类轨道：纵向滚轮转横向滚动 */
+  const rail = $('#chipRail');
+  if (rail) rail.addEventListener('wheel', ev => {
+    if (!ev.deltaY) return;
+    ev.preventDefault();
+    rail.scrollLeft += ev.deltaY;
+  }, { passive: false });
 
   backTopBtn.onclick = () => {
     setTopbarHidden(false);
