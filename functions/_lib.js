@@ -4,6 +4,7 @@
 export const LIMITS = {
   title: 60,
   prompt: 2000,
+  negative: 2000,
   comment: 500,
   submitter: 20,
   category: 60,
@@ -17,10 +18,16 @@ export const LIMITS = {
 
 export const IMAGE_LABELS = ['gallery', 'face', 'scene', 'nsfw'];
 
+const ABS_URL_RE = /^(?:https?:)?\/\//i;
+const HOST_PATH_RE = /^[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/|$)/i;
+
 // 社区专用 R2 桶的公开访问地址，来自 Pages 环境变量 STRINGS_PUBLIC_BASE
 // （线上=新桶的 https://pub-….r2.dev 地址；本地 wrangler dev 在 .dev.vars 设为 /r2，经 functions/r2/ 代理读本地模拟桶）
 export function publicBase(env) {
-  return String(env.STRINGS_PUBLIC_BASE || '').replace(/\/+$/, '');
+  const raw = String(env.STRINGS_PUBLIC_BASE || '').trim().replace(/\/+$/, '');
+  if (!raw || raw.startsWith('/') || /^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith('//')) return 'https:' + raw;
+  return 'https://' + raw;
 }
 
 // 存储相关配置齐全则返回 null，否则返回应直接回给客户端的错误 Response
@@ -32,6 +39,13 @@ export function requireStorage(env) {
 
 export function imageUrl(env, key) {
   return publicBase(env) + '/' + String(key).split('/').map(encodeURIComponent).join('/');
+}
+
+export function normalizeImageFile(file) {
+  const s = String(file == null ? '' : file).trim();
+  if (!s || ABS_URL_RE.test(s) || s.startsWith('/') || s.startsWith('data:')) return s;
+  if (HOST_PATH_RE.test(s)) return 'https://' + s;
+  return s;
 }
 
 export function json(data, status = 200, headers = {}) {
@@ -125,6 +139,7 @@ export function toEntry(env, rec) {
     id: rec.id,
     title: rec.title || '',
     prompt: rec.prompt || '',
+    negative: rec.negative || '',
     comment: rec.comment || '',
     tags: Array.isArray(rec.tags) ? rec.tags : [],
     category: Array.isArray(rec.category) ? rec.category : [],
