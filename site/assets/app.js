@@ -91,6 +91,7 @@ async function loadCodex(id) {
   state.query = '';
   $('#search').value = '';
   renderTree();
+  renderCodexHeader();
   applyFilter({ resetScroll: true });
   setLoading('');
 }
@@ -362,6 +363,52 @@ function updateResultBar() {
   box.appendChild(count);
 
   $('#empty').hidden = n > 0;
+  updateRailActive();
+}
+
+/* ---------------- 法典横幅 / 分类轨道 ---------------- */
+function renderCodexHeader() {
+  const c = state.codex;
+  const banner = $('#codexBanner');
+  if (!banner) return;
+  const cover = c.entries.find(hasEntryImage);
+  const pct = c.entryCount ? Math.round((c.imagedCount / c.entryCount) * 100) : 0;
+  banner.innerHTML =
+    `<div class="banner-cover">${cover ? `<img src="${esc(thumbUrl(cover))}" alt="">` : ''}</div>` +
+    `<div class="banner-info">` +
+    `<div class="banner-title">${esc(c.title)}</div>` +
+    `<div class="banner-meta">${esc(c.author || '')}${c.author ? ' · ' : ''}${esc(c.version || '')}</div>` +
+    `<div class="banner-progress"><div class="bp-track"><div class="bp-fill" style="width:${pct}%"></div></div>` +
+    `<span class="bp-text">${c.imagedCount} / ${c.entryCount} 已配图</span></div>` +
+    `</div>`;
+  const rail = $('#chipRail');
+  if (!rail) return;
+  rail.innerHTML = '';
+  const mkChip = (label, path, count, hue) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'rail-chip';
+    chip.dataset.path = path.join('\u0001');
+    chip.innerHTML = `<span class="rc-dot" style="background:${hue}"></span>${esc(label)}<span class="rc-n">${count}</span>`;
+    chip.onclick = () => selectPathByPath(path);
+    rail.appendChild(chip);
+  };
+  mkChip('全部', [], c.entryCount, 'var(--accent)');
+  for (const nd of c.tree) {
+    let h = 0;
+    for (const ch of nd.name) h = (h * 31 + ch.codePointAt(0)) % 360;
+    mkChip(nd.name, [nd.name], nd.count, `hsl(${h},58%,52%)`);
+  }
+  updateRailActive();
+}
+
+function updateRailActive() {
+  const rail = $('#chipRail');
+  if (!rail) return;
+  const head = state.query.trim() ? null : (state.activePath[0] || '');
+  rail.querySelectorAll('.rail-chip').forEach(ch => {
+    ch.classList.toggle('active', head !== null && (ch.dataset.path || '') === head);
+  });
 }
 
 /* ---------------- 虚拟瀑布流 ---------------- */
@@ -1011,6 +1058,14 @@ function bindUI() {
     setTopbarHidden(dy > 0 && y > 120);
   }, { passive: true });
   searchInput.addEventListener('focus', () => setTopbarHidden(false));
+
+  /* 分类轨道：纵向滚轮转横向滚动 */
+  const rail = $('#chipRail');
+  if (rail) rail.addEventListener('wheel', ev => {
+    if (!ev.deltaY) return;
+    ev.preventDefault();
+    rail.scrollLeft += ev.deltaY;
+  }, { passive: false });
 
   backTopBtn.onclick = () => {
     setTopbarHidden(false);
